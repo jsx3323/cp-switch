@@ -793,9 +793,8 @@ fn test_cli_list_shows_missing_active() {
     cp_switch::store::save_profile("vanish", &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
     run_cli("use vanish", dir.path());
 
-    // 手动删除 profile 文件（模拟用户误删）
-    let path = cp_switch::store::profile_path("vanish");
-    fs::remove_file(&path).unwrap();
+    // 手动删除 profile（模拟用户误删）
+    cp_switch::store::delete_profile("vanish").unwrap();
 
     // list 应显示 "(active - missing!)"
     let (ok, stdout, stderr) = run_cli("list", dir.path());

@@ -14,17 +14,8 @@ pub(crate) fn store_dir() -> PathBuf {
         })
 }
 
-pub(crate) fn profiles_dir() -> PathBuf {
-    store_dir().join("profiles")
-}
-
-pub fn profile_path(name: &str) -> PathBuf {
-    profiles_dir().join(format!("{}.json", name))
-}
-
-pub(crate) fn project_current_path(project: &Path) -> PathBuf {
-    let hash = simple_hash(project.to_string_lossy().as_ref());
-    store_dir().join("projects").join(hash).join("current")
+pub(crate) fn state_path() -> PathBuf {
+    store_dir().join("state.json")
 }
 
 pub(crate) fn settings_local_path(project: &Path) -> PathBuf {
@@ -44,17 +35,4 @@ pub fn user_settings_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
         .join(".claude")
         .join("settings.json")
-}
-
-pub(crate) fn user_current_path() -> PathBuf {
-    store_dir().join("current")
-}
-
-pub(crate) fn simple_hash(s: &str) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325; // FNV offset basis
-    for b in s.bytes() {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(0x100000001b3); // FNV prime
-    }
-    format!("{:016x}", hash)
 }
