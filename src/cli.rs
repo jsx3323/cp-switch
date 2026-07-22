@@ -15,12 +15,19 @@ pub struct Cli {
 pub enum Commands {
     /// 列出所有配置，标记当前活跃
     #[command(visible_aliases = ["ls"])]
-    List,
+    List {
+        /// 显示用户级活跃状态（对比 ~/.claude/settings.json）
+        #[arg(long, short)]
+        user: bool,
+    },
 
     /// 切换到指定配置
     Use {
         /// 配置名称
         name: String,
+        /// 写入用户级 settings.json（~/.claude/settings.json）
+        #[arg(long, short)]
+        user: bool,
     },
 
     /// 添加一个新的配置
@@ -34,7 +41,11 @@ pub enum Commands {
 
     /// 显示当前活跃配置名称
     #[command(visible_aliases = ["show"])]
-    Current,
+    Current {
+        /// 读取用户级 current 标记
+        #[arg(long, short)]
+        user: bool,
+    },
 
     /// 删除指定配置
     #[command(visible_aliases = ["rm"])]
@@ -50,6 +61,9 @@ pub enum Commands {
     Diff {
         /// 配置名称
         name: String,
+        /// 对比用户级 settings.json
+        #[arg(long, short)]
+        user: bool,
     },
 
     /// 编辑已有配置（以当前值为默认）

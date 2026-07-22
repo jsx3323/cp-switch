@@ -5,3 +5,4 @@ pub mod current;
 pub mod delete;
 pub mod diff;
 pub mod edit;
+pub mod prompt;

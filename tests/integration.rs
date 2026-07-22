@@ -73,6 +73,35 @@ fn combined_output(stdout: &str, stderr: &str) -> String {
     stdout.to_string() + stderr
 }
 
+// ── 用户模式测试辅助 ──
+
+fn setup_home() -> TempDir {
+    tempfile::tempdir().unwrap()
+}
+
+fn read_user_settings(home: &std::path::Path) -> serde_json::Value {
+    let path = home.join(".claude/settings.json");
+    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap()
+}
+
+fn run_cli_user(args: &str, input: &str, home: &std::path::Path) -> (bool, String, String) {
+    let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
+    let mut child = Command::new(&bin)
+        .args(args.split_whitespace())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .env("CP_SWITCH_DIR", store_dir_val())
+        .env("HOME", home)
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+    let output = child.wait_with_output().unwrap();
+    (output.status.success(),
+     String::from_utf8_lossy(&output.stdout).to_string(),
+     String::from_utf8_lossy(&output.stderr).to_string())
+}
+
 // ============================================================
 // 单元测试
 // ============================================================
@@ -965,4 +994,293 @@ fn test_write_settings_backup_overwrites_on_successive_use() {
     run_cli("use b", dir.path());
     let bak2: serde_json::Value = serde_json::from_str(&fs::read_to_string(&bak_path).unwrap()).unwrap();
     assert_eq!(bak2.get("env").unwrap().get("ANTHROPIC_BASE_URL").unwrap(), "https://a");
+}
+
+// ============================================================
+// 用户模式（--user）测试
+// ============================================================
+
+#[test]
+fn test_cli_use_user_creates_settings_and_current() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    // 先添加 profile
+    let (ok, _, stderr) = run_cli_user("add test-user",
+        "https://api.test.com\nsk-test\nclaude-sonnet-4\n\n\n\n\n",
+        &home_path);
+    assert!(ok, "add failed: {}", stderr);
+
+    // use --user
+    let input = "y\n"; // 项目模式才需要确认，用户模式不需要
+    let (ok, _, stderr) = run_cli_user("use --user test-user", input, &home_path);
+    assert!(ok, "use --user failed: {}", stderr);
+
+    // 验证 ~/home/.claude/settings.json 被创建
+    assert!(home_path.join(".claude/settings.json").exists());
+    let settings = read_user_settings(&home_path);
+    let env_obj = get_env_obj(&settings);
+    assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://api.test.com");
+    assert_eq!(env_obj.get("ANTHROPIC_API_KEY").unwrap(), "sk-test");
+    assert_eq!(env_obj.get("ANTHROPIC_MODEL").unwrap(), "claude-sonnet-4");
+
+    // 验证用户级 current 标记
+    let current = cp_switch::store::read_user_current().unwrap();
+    assert_eq!(current, Some("test-user".to_string()));
+}
+
+#[test]
+fn test_cli_use_user_reapply() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    let (ok, _, stderr) = run_cli_user("add user-reapply",
+        "https://a.com\nsk-a\nmodel-a\n\n\n\n\n",
+        &home_path);
+    assert!(ok, "add failed: {}", stderr);
+
+    // 第一次 use --user
+    let (ok, _, stderr) = run_cli_user("use --user user-reapply", "", &home_path);
+    assert!(ok, "first use failed: {}", stderr);
+
+    // 再次 use --user
+    let (ok, stdout, stderr) = run_cli_user("use --user user-reapply", "", &home_path);
+    assert!(ok, "reapply failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("Switched to profile 'user-reapply' (user)"));
+
+    let settings = read_user_settings(&home_path);
+    let env_obj = get_env_obj(&settings);
+    assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://a.com");
+}
+
+#[test]
+fn test_cli_current_user() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    // 无活跃时
+    let (ok, stdout, stderr) = run_cli_user("current --user", "", &home_path);
+    assert!(ok);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("No active user-level profile"));
+
+    // 创建并 use
+    run_cli_user("add user-curr", "https://c.com\nsk-c\nmodel-c\n\n\n\n\n", &home_path);
+    run_cli_user("use --user user-curr", "", &home_path);
+
+    // current --user 应显示
+    let (ok, stdout, stderr) = run_cli_user("current --user", "", &home_path);
+    assert!(ok);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("user-curr"));
+}
+
+#[test]
+fn test_cli_list_user_shows_active() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    cp_switch::store::save_profile("alpha", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://a", "ANTHROPIC_API_KEY": "sk-a", "ANTHROPIC_MODEL": "a"
+    })).unwrap();
+    cp_switch::store::save_profile("beta", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://b", "ANTHROPIC_API_KEY": "sk-b", "ANTHROPIC_MODEL": "b"
+    })).unwrap();
+
+    // use --user alpha
+    run_cli_user("use --user alpha", "", &home_path);
+
+    // list --user 应显示 alpha 为 active
+    let (ok, stdout, stderr) = run_cli_user("list --user", "", &home_path);
+    assert!(ok);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("(active)"));
+    assert!(!out.contains("beta") || !stdout.contains("(active)") || stdout.matches("(active)").count() == 1);
+}
+
+#[test]
+fn test_cli_diff_user() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    cp_switch::store::save_profile("diff-me", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://new", "ANTHROPIC_MODEL": "new"
+    })).unwrap();
+
+    // use --user 先设置
+    run_cli_user("use --user diff-me", "", &home_path);
+
+    // 更新 profile 使其 outdated
+    cp_switch::store::save_profile("diff-me", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://updated", "ANTHROPIC_MODEL": "updated"
+    })).unwrap();
+
+    let (ok, stdout, stderr) = run_cli_user("diff --user diff-me", "", &home_path);
+    assert!(ok, "diff failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("user settings") || out.contains("profile:"));
+    assert!(out.contains("-") && out.contains("+"));
+}
+
+#[test]
+fn test_cli_delete_user_active() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    cp_switch::store::save_profile("user-del", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://d", "ANTHROPIC_MODEL": "d"
+    })).unwrap();
+
+    // use --user
+    run_cli_user("use --user user-del", "", &home_path);
+
+    // 确认用户级 current 标记存在
+    assert_eq!(cp_switch::store::read_user_current().unwrap(), Some("user-del".to_string()));
+
+    // --force 删除
+    let (ok, _, stderr) = run_cli_user("delete user-del --force", "", &home_path);
+    assert!(ok, "delete failed: {}", stderr);
+
+    // 用户级 current 标记应被清除
+    assert!(cp_switch::store::read_user_current().unwrap().is_none());
+}
+
+#[test]
+fn test_cli_delete_user_active_prompts() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    cp_switch::store::save_profile("user-prompt", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://e", "ANTHROPIC_MODEL": "e"
+    })).unwrap();
+
+    run_cli_user("use --user user-prompt", "", &home_path);
+
+    // 不带 --force，回答 n 取消
+    let (ok, stdout, stderr) = run_cli_user("delete user-prompt", "n\n", &home_path);
+    assert!(ok);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("Cancelled"));
+    // profile 仍存在
+    assert!(cp_switch::store::list_profiles().unwrap().contains(&"user-prompt".to_string()));
+    // current 标记仍在
+    assert_eq!(cp_switch::store::read_user_current().unwrap(), Some("user-prompt".to_string()));
+}
+
+#[test]
+fn test_cli_use_user_preserves_permissions() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    // 先创建 ~/home/.claude/settings.json 带 permissions
+    let claude_dir = home_path.join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(claude_dir.join("settings.json"), r#"{"permissions":{"allow":["Bash(ls)"]},"env":{"ANTHROPIC_MODEL":"old"}}"#).unwrap();
+
+    cp_switch::store::save_profile("perm-test", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://p", "ANTHROPIC_API_KEY": "sk-p", "ANTHROPIC_MODEL": "p"
+    })).unwrap();
+
+    let (ok, _, stderr) = run_cli_user("use --user perm-test", "", &home_path);
+    assert!(ok, "use failed: {}", stderr);
+
+    let settings = read_user_settings(&home_path);
+    assert!(settings.get("permissions").is_some());
+    let env_obj = get_env_obj(&settings);
+    assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://p");
+}
+
+#[test]
+fn test_cli_list_user_no_profiles() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    let (ok, stdout, stderr) = run_cli_user("list --user", "", &home_path);
+    assert!(ok);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("No profiles found"));
+}
+
+#[test]
+fn test_cli_delete_dual_active_clears_both() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    // 创建 profile 并用 use 和 use --user 分别设置两个上下文的活跃
+    cp_switch::store::save_profile("dual", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://dual", "ANTHROPIC_API_KEY": "sk-dual", "ANTHROPIC_MODEL": "dual"
+    })).unwrap();
+
+    // 项目级 use
+    let project_dir = setup_project(r#"{"env":{}}"#);
+    run_cli("use dual", project_dir.path());
+
+    // 用户级 use --user
+    run_cli_user("use --user dual", "", &home_path);
+
+    // 两个 current 标记都应存在
+    assert_eq!(cp_switch::store::read_current(project_dir.path()).unwrap(), Some("dual".to_string()));
+    assert_eq!(cp_switch::store::read_user_current().unwrap(), Some("dual".to_string()));
+
+    // --force 删除
+    let (ok, stdout, stderr) = run_cli("delete dual --force", project_dir.path());
+    assert!(ok, "delete failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("both project and user"));
+
+    // 两个 current 标记都应被清除
+    assert!(cp_switch::store::read_current(project_dir.path()).unwrap().is_none());
+    assert!(cp_switch::store::read_user_current().unwrap().is_none());
+}
+
+#[test]
+fn test_cli_use_user_and_project_independent() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    // 两个 profile：proj-profile 和 user-profile
+    cp_switch::store::save_profile("proj-profile", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://proj", "ANTHROPIC_API_KEY": "sk-proj", "ANTHROPIC_MODEL": "proj"
+    })).unwrap();
+    cp_switch::store::save_profile("user-profile", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://usr", "ANTHROPIC_API_KEY": "sk-usr", "ANTHROPIC_MODEL": "usr"
+    })).unwrap();
+
+    // 项目级 use proj-profile
+    let project_dir = setup_project(r#"{"env":{}}"#);
+    run_cli("use proj-profile", project_dir.path());
+
+    // 用户级 use --user user-profile
+    run_cli_user("use --user user-profile", "", &home_path);
+
+    // current 分别显示各自的
+    let (_ok, stdout, _) = run_cli("current", project_dir.path());
+    let out = combined_output(&stdout, "");
+    assert!(out.contains("proj-profile"));
+
+    let (_ok, stdout, _) = run_cli_user("current --user", "", &home_path);
+    let out = combined_output(&stdout, "");
+    assert!(out.contains("user-profile"));
+
+    // 项目 settings 不应有用户 profile 的数据
+    let settings = read_settings(project_dir.path());
+    let env_obj = get_env_obj(&settings);
+    assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://proj");
+
+    // 用户 settings 不应有项目 profile 的数据
+    let user_settings = read_user_settings(&home_path);
+    let user_env_obj = get_env_obj(&user_settings);
+    assert_eq!(user_env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://usr");
 }

@@ -10,5 +10,8 @@ pub use keys::{KEY_BASE_URL, KEY_API_KEY, KEY_AUTH_TOKEN, KEY_MODEL, KEY_SMALL_F
 pub use path::{profile_path, find_project_dir, has_claude_dir};
 pub use io::{list_profiles, read_current, write_current, clear_current,
              read_profile, save_profile, delete_profile, read_current_env,
-             read_settings_local, write_settings_local};
+             read_settings_local, write_settings_local,
+             read_user_settings, write_user_settings,
+             read_user_current, write_user_current, clear_user_current,
+             read_user_current_env};
 pub use merge::merge_env;

@@ -3,11 +3,12 @@ use std::fs;
 
 use serde_json::Value;
 use crate::error::{CsError, io_err, json_err, serialization_err};
-use super::path::{profiles_dir, profile_path, project_current_path, settings_local_path};
+use super::path::{profiles_dir, profile_path, project_current_path, settings_local_path,
+                   user_settings_path, user_current_path};
 use super::keys::is_claude_env_key;
 
 fn sibling_path(path: &Path, suffix: &str) -> PathBuf {
-    let file_name = path.file_name().unwrap().to_str().unwrap();
+    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
     path.with_file_name(format!("{}{}", file_name, suffix))
 }
 
@@ -123,6 +124,10 @@ pub fn write_settings_local(project: &Path, content: &Value) -> Result<(), CsErr
 
 pub fn read_current_env(project: &Path) -> Result<Value, CsError> {
     let settings = read_settings_local(project)?;
+    filter_claude_env(&settings)
+}
+
+fn filter_claude_env(settings: &Value) -> Result<Value, CsError> {
     let env = settings.get("env").cloned().unwrap_or(Value::Object(serde_json::Map::new()));
     let env_obj = env.as_object()
         .ok_or(CsError::MalformedJson { detail: "\"env\" field must be a JSON object".into() })?;
@@ -132,4 +137,60 @@ pub fn read_current_env(project: &Path) -> Result<Value, CsError> {
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     Ok(Value::Object(filtered))
+}
+
+// ── 用户级 settings ──
+
+pub fn read_user_settings() -> Result<Value, CsError> {
+    let path = user_settings_path();
+    match fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).map_err(|e| json_err(&path, e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok(serde_json::json!({"permissions": {"allow": [], "deny": []}, "env": {}}))
+        }
+        Err(e) => Err(io_err(&path, e)),
+    }
+}
+
+pub fn write_user_settings(content: &Value) -> Result<(), CsError> {
+    let path = user_settings_path();
+
+    let bak = sibling_path(&path, ".bak");
+    match fs::copy(&path, &bak) {
+        Ok(_) => {},
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+        Err(e) => return Err(io_err(&bak, e)),
+    }
+
+    let json = serde_json::to_string_pretty(content).map_err(|e| serialization_err(&path.display().to_string(), e))?;
+    atomic_write(&path, &json)
+}
+
+pub fn read_user_current_env() -> Result<Value, CsError> {
+    let settings = read_user_settings()?;
+    filter_claude_env(&settings)
+}
+
+// ── 用户级 current 标记 ──
+
+pub fn read_user_current() -> Result<Option<String>, CsError> {
+    let path = user_current_path();
+    match fs::read_to_string(&path) {
+        Ok(content) => Ok(Some(content.trim().to_string())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io_err(&path, e)),
+    }
+}
+
+pub fn write_user_current(name: &str) -> Result<(), CsError> {
+    atomic_write(&user_current_path(), name)
+}
+
+pub fn clear_user_current() -> Result<(), CsError> {
+    let path = user_current_path();
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io_err(&path, e)),
+    }
 }

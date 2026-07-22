@@ -10,21 +10,23 @@ src/
   main.rs         — 命令分发（find_project_dir 集中调用）+ 错误处理
   lib.rs          — 模块导出
   error.rs        — CsError 枚举（8 变体）+ io_err/json_err/serialization_err
-  input.rs        — 交互式输入（prompt_required/prompt_optional→Option/prompt_confirm）
-  output.rs       — 终端彩色输出（含 diff 渲染和 list 缺失状态）
+  input.rs        — 交互式输入（prompt_required/prompt_with_default/prompt_optional→Option/prompt_confirm）
+  output.rs       — 终端彩色输出（含 diff 渲染和 ListStatus 枚举）
   store/
     mod.rs        — 显式 re-export（不含 validate_name）
-    keys.rs       — KEY_* 常量（7 个）+ is_claude_env_key + derive_default_models
+    keys.rs       — KEY_* 常量（11 个）+ is_claude_env_key + derive_default_models + CONFLICT_GROUPS
     path.rs       — 路径构造 + find_project_dir + simple_hash（pub(crate）内部函数）
     io.rs         — 文件 CRUD（profile/current/settings 读写）+ read_current_env（settings 不存在时返回默认空值）+ 原子写入（write→tmp→rename）+ settings 备份
     merge.rs      — merge_env 纯函数（不读写文件）
   command/
+    prompt.rs     — 共享 prompt_profile_env（add/edit 共用字段提示）
     add.rs        — 交互式创建 profile
-    use_profile.rs — 切换配置（IO 编排：read→merge→write）
-    list.rs       — 列出 profiles + 活跃标记（活跃 profile 文件缺失时显示 missing）
+    use_profile.rs — 切换配置（IO 编排：read→merge→write，含 .claude 目录检查）
+    list.rs       — 列出 profiles + 活跃标记（ListStatus::Active/Outdated/Missing/Inactive）
     current.rs    — 显示当前 profile
     delete.rs     — 删除 profile（活跃时需确认）
-    diff.rs       — 当前 env 与 profile 的文本 diff
+    diff.rs       — 当前 env 与 profile 的文本 diff（含 .claude 目录检查）
+    edit.rs       — 编辑已有 profile（保留非标准 key）
 tests/
   integration.rs  — 单元/纯函数测试 + CLI 子进程测试 + 错误路径 + 端到端行为测试
 ```

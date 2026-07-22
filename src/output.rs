@@ -24,20 +24,35 @@ pub fn removed(key: &str) {
     println!("  - {} (removed)", key.yellow());
 }
 
-pub fn list_item(name: &str, is_active: bool) {
-    if is_active {
-        println!("  {} {} {}", "*".green().bold(), name.bold(), "(active)".green());
-    } else {
-        println!("    {}", name);
+pub enum ListStatus {
+    Inactive,
+    Active,
+    Outdated,
+    Missing,
+}
+
+impl ListStatus {
+    fn suffix(&self) -> colored::ColoredString {
+        match self {
+            ListStatus::Inactive => "".normal(),
+            ListStatus::Active => "(active)".green(),
+            ListStatus::Outdated => "(active - outdated)".yellow(),
+            ListStatus::Missing => "(active - missing!)".red(),
+        }
     }
 }
 
-pub fn list_item_missing(name: &str) {
-    println!("  {} {} {}", "*".green().bold(), name.bold(), "(active - missing!)".red());
-}
-
-pub fn list_item_outdated(name: &str) {
-    println!("  {} {} {}", "*".green().bold(), name.bold(), "(active - outdated)".yellow());
+pub fn list_item(name: &str, status: &ListStatus) {
+    let prefix = match status {
+        ListStatus::Inactive => "  ",
+        _ => "  *",
+    };
+    let suffix = status.suffix();
+    if suffix.is_empty() {
+        println!("{}  {}", prefix, name);
+    } else {
+        println!("{} {} {}", prefix.green().bold(), name.bold(), suffix);
+    }
 }
 
 pub fn diff_header(current_label: &str, profile_label: &str) {

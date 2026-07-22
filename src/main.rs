@@ -2,7 +2,6 @@ use clap::Parser;
 use cp_switch::cli::{Cli, Commands};
 use cp_switch::command;
 use cp_switch::error::CsError;
-use cp_switch::input;
 use cp_switch::output;
 use cp_switch::store;
 
@@ -22,40 +21,43 @@ fn main() {
 
 fn run(cli: Cli) -> Result<(), CsError> {
     match cli.command {
-        Commands::List => {
-            let project = store::find_project_dir()?;
-            command::list::run(&project)
+        Commands::List { user } => {
+            if user {
+                command::list::run_user()
+            } else {
+                let project = store::find_project_dir()?;
+                command::list::run(&project)
+            }
         }
-        Commands::Use { name } => {
-            let project = store::find_project_dir()?;
-            ensure_claude_dir(&project)?;
-            command::use_profile::run(&name, &project)
+        Commands::Use { name, user } => {
+            if user {
+                command::use_profile::run_user(&name)
+            } else {
+                let project = store::find_project_dir()?;
+                command::use_profile::run(&name, &project)
+            }
         }
         Commands::Add { name, force } => command::add::run(&name, force),
-        Commands::Current => {
-            let project = store::find_project_dir()?;
-            command::current::run(&project)
+        Commands::Current { user } => {
+            if user {
+                command::current::run_user()
+            } else {
+                let project = store::find_project_dir()?;
+                command::current::run(&project)
+            }
         }
         Commands::Delete { name, force } => {
             let project = store::find_project_dir()?;
             command::delete::run(&name, force, &project)
         }
-        Commands::Diff { name } => {
-            let project = store::find_project_dir()?;
-            ensure_claude_dir(&project)?;
-            command::diff::run(&name, &project)
+        Commands::Diff { name, user } => {
+            if user {
+                command::diff::run_user(&name)
+            } else {
+                let project = store::find_project_dir()?;
+                command::diff::run(&name, &project)
+            }
         }
         Commands::Edit { name } => command::edit::run(&name),
     }
-}
-
-fn ensure_claude_dir(project: &std::path::Path) -> Result<(), CsError> {
-    if store::has_claude_dir(project) {
-        return Ok(());
-    }
-    output::warn("当前目录没有 .claude 目录");
-    if !input::prompt_confirm("是否新建 .claude/settings.local.json？")? {
-        return Err(CsError::NoClaudeDir);
-    }
-    Ok(())
 }

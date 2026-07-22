@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use crate::error::CsError;
-use crate::output;
-use crate::store::{list_profiles, read_current, read_current_env, read_profile};
+use crate::output::{self, ListStatus};
+use crate::store::{list_profiles, read_current, read_current_env, read_profile,
+                   read_user_current, read_user_current_env};
 
 /// 检查 profile 的每个 key 在当前 env 中是否都有相同的值
 fn is_profile_synced(current_env: &serde_json::Value, profile_env: &serde_json::Value) -> bool {
@@ -29,19 +30,55 @@ pub fn run(project: &Path) -> Result<(), CsError> {
             let current_env = read_current_env(project)?;
             let profile_env = read_profile(name)?;
             if is_profile_synced(&current_env, &profile_env) {
-                output::list_item(name, true);
+                output::list_item(name, &ListStatus::Active);
             } else {
-                output::list_item_outdated(name);
+                output::list_item(name, &ListStatus::Outdated);
             }
         } else {
-            output::list_item(name, false);
+            output::list_item(name, &ListStatus::Inactive);
         }
     }
 
     // 活跃 profile 的文件被手动删除
     if let Some(active) = &current
         && !profiles.contains(active) {
-            output::list_item_missing(active);
+            output::list_item(active, &ListStatus::Missing);
+    }
+
+    let active_count = if current.is_some() { 1 } else { 0 };
+    output::info(&format!("{} profiles, {} active", profiles.len(), active_count));
+    Ok(())
+}
+
+pub fn run_user() -> Result<(), CsError> {
+    let profiles = list_profiles()?;
+    let current = read_user_current()?;
+
+    if profiles.is_empty() && current.is_none() {
+        output::info("No profiles found. Use 'cp-switch add <name>' to create one.");
+        return Ok(());
+    }
+
+    output::info("Profiles (user):");
+
+    for name in &profiles {
+        let is_active = current.as_ref() == Some(name);
+        if is_active {
+            let current_env = read_user_current_env()?;
+            let profile_env = read_profile(name)?;
+            if is_profile_synced(&current_env, &profile_env) {
+                output::list_item(name, &ListStatus::Active);
+            } else {
+                output::list_item(name, &ListStatus::Outdated);
+            }
+        } else {
+            output::list_item(name, &ListStatus::Inactive);
+        }
+    }
+
+    if let Some(active) = &current
+        && !profiles.contains(active) {
+            output::list_item(active, &ListStatus::Missing);
     }
 
     let active_count = if current.is_some() { 1 } else { 0 };

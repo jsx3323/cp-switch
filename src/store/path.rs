@@ -1,61 +1,17 @@
 use std::path::{Path, PathBuf};
 use std::env;
-use std::fs;
 
 use crate::error::{CsError, io_err};
 
 pub(crate) fn store_dir() -> PathBuf {
-    let new_dir = std::env::var("CP_SWITCH_DIR")
+    std::env::var("CP_SWITCH_DIR")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("/"))
                 .join(".cp-switch")
-        });
-
-    // 环境变量覆盖时，不自动迁移
-    if std::env::var("CP_SWITCH_DIR").is_err() {
-        migrate_old_store(&new_dir);
-    }
-
-    new_dir
-}
-
-/// 将 ~/.claude-provider-switch 内容迁移到 ~/.cp-switch
-fn migrate_old_store(new_dir: &Path) {
-    if new_dir.exists() {
-        return;
-    }
-    let old_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("/"))
-        .join(".claude-provider-switch");
-    if !old_dir.exists() {
-        return;
-    }
-    if let Err(e) = copy_dir_recursively(&old_dir, new_dir) {
-        eprintln!("cp-switch: migration from {} to {} failed: {}",
-            old_dir.display(), new_dir.display(), e);
-    } else {
-        eprintln!("cp-switch: migrated profiles from {} to {}",
-            old_dir.display(), new_dir.display());
-    }
-}
-
-fn copy_dir_recursively(src: &Path, dst: &Path) -> Result<(), std::io::Error> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_recursively(&src_path, &dst_path)?;
-        } else {
-            fs::copy(&src_path, &dst_path)?;
-        }
-    }
-    Ok(())
+        })
 }
 
 pub(crate) fn profiles_dir() -> PathBuf {
@@ -81,6 +37,17 @@ pub fn find_project_dir() -> Result<PathBuf, CsError> {
 
 pub fn has_claude_dir(project: &Path) -> bool {
     project.join(".claude").exists()
+}
+
+pub fn user_settings_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/"))
+        .join(".claude")
+        .join("settings.json")
+}
+
+pub(crate) fn user_current_path() -> PathBuf {
+    store_dir().join("current")
 }
 
 pub(crate) fn simple_hash(s: &str) -> String {
