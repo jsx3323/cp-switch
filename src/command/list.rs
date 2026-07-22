@@ -17,7 +17,7 @@ pub fn run(project: &Path) -> Result<(), CsError> {
     let current = read_current(project)?;
 
     if profiles.is_empty() && current.is_none() {
-        output::info("No profiles found. Use 'claude-provider-switch add <name>' to create one.");
+        output::info("No profiles found. Use 'cp-switch add <name>' to create one.");
         return Ok(());
     }
 

@@ -1,10 +1,10 @@
 use clap::Parser;
-use claude_provider_switch::cli::{Cli, Commands};
-use claude_provider_switch::command;
-use claude_provider_switch::error::CsError;
-use claude_provider_switch::input;
-use claude_provider_switch::output;
-use claude_provider_switch::store;
+use cp_switch::cli::{Cli, Commands};
+use cp_switch::command;
+use cp_switch::error::CsError;
+use cp_switch::input;
+use cp_switch::output;
+use cp_switch::store;
 
 fn main() {
     let cli = Cli::parse();

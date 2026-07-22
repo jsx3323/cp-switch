@@ -1,4 +1,4 @@
-# claude-provider-switch
+# cp-switch
 
 Rust CLI 工具，切换 Claude Code 的 API 连接配置。
 
@@ -47,10 +47,10 @@ tests/
 
 ## 存储
 
-- Profile: `~/.claude-provider-switch/profiles/<name>.json`（仅含 ANTHROPIC_* env vars）
-- Current marker: `~/.claude-provider-switch/projects/<fnv1a-hash>/current`
+- Profile: `~/.cp-switch/profiles/<name>.json`（仅含 ANTHROPIC_* env vars）
+- Current marker: `~/.cp-switch/projects/<fnv1a-hash>/current`
 - Settings: 项目 `.claude/settings.local.json` 的 `env` 字段
-- `CLAUDE_PROVIDER_SWITCH_DIR` 环境变量可覆盖根目录
+- `CP_SWITCH_DIR` 环境变量可覆盖根目录
 - 跨平台 home 目录通过 `dirs` crate
 
 ## use 行为
@@ -63,4 +63,4 @@ tests/
 cargo test -- --test-threads=1
 ```
 
-`--test-threads=1` 必须因为 `std::env::set_var` 需要单线程。测试通过 `CLAUDE_PROVIDER_SWITCH_DIR` + tempfile 隔离，不操作真实环境。
+`--test-threads=1` 必须因为 `std::env::set_var` 需要单线程。测试通过 `CP_SWITCH_DIR` + tempfile 隔离，不操作真实环境。

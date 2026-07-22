@@ -1,10 +1,10 @@
 [package]
-name = "claude-provider-switch"
+name = "cp-switch"
 version = "0.1.0"
 edition = "2024"
 description = "CLI tool to switch Claude Code API provider profiles"
 license = "MIT"
-repository = "https://github.com/jsx3323/claude-provider-switch"
+repository = "https://github.com/jsx3323/cp-switch"
 categories = ["command-line-utilities"]
 keywords = ["claude", "cli", "profile", "switch"]
 

@@ -60,7 +60,7 @@ impl CsError {
     pub fn hint(&self) -> Option<String> {
         match self {
             CsError::NoActiveProfile => {
-                Some("Use 'claude-provider-switch add <name>' to create and activate a profile".into())
+                Some("Use 'cp-switch add <name>' to create and activate a profile".into())
             }
             CsError::MalformedJson { .. } => {
                 Some("Check your .claude/settings.local.json for manual edits that broke the structure".into())
