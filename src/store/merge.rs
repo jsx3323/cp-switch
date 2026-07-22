@@ -14,7 +14,6 @@ pub fn merge_env(mut settings: Value, env_values: &Value) -> Result<(Value, Vec<
     let env_obj = settings_env.as_object_mut()
         .ok_or(CsError::MalformedJson { detail: "\"env\" field must be a JSON object".into() })?;
 
-    // 先清除所有受管理的 key，再写入 profile 的 key
     let mut removed = Vec::new();
     env_obj.retain(|k, _| {
         if is_claude_env_key(k) {
@@ -30,6 +29,9 @@ pub fn merge_env(mut settings: Value, env_values: &Value) -> Result<(Value, Vec<
         env_obj.insert(key.clone(), value.clone());
         written.push(key.clone());
     }
+
+    // removed 暂含所有被清除的受管理 key；剔除 profile 重新写入的，只保留真正移除的
+    removed.retain(|k| !profile_env.contains_key(k));
 
     Ok((settings, written, removed))
 }
