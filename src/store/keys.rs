@@ -24,6 +24,11 @@ pub fn is_claude_env_key(key: &str) -> bool {
     MANAGED_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
 }
 
+/// 判断是否为内置 profile 名称
+pub fn is_builtin(name: &str) -> bool {
+    name == CLAUDE_PROFILE_NAME
+}
+
 /// 返回 settings 中应被清除的冲突 key（组内不在 profile 中的 key）
 pub(crate) fn conflicting_keys(profile_env: &serde_json::Map<String, serde_json::Value>) -> Vec<&str> {
     let mut result = Vec::new();

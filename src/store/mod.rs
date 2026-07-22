@@ -7,7 +7,7 @@ pub use keys::{KEY_BASE_URL, KEY_API_KEY, KEY_AUTH_TOKEN, KEY_MODEL, KEY_SMALL_F
                KEY_DEFAULT_HAIKU, KEY_DEFAULT_SONNET, KEY_DEFAULT_OPUS,
                KEY_SUBAGENT_MODEL, KEY_EFFORT_LEVEL, KEY_AUTO_COMPACT_WINDOW,
                CLAUDE_PROFILE_NAME,
-               is_claude_env_key, derive_default_models, CONFLICT_GROUPS};
+               is_claude_env_key, is_builtin, derive_default_models, CONFLICT_GROUPS};
 pub use path::{profile_path, find_project_dir, has_claude_dir};
 pub use io::{list_profiles, read_current, write_current, clear_current,
              read_profile, save_profile, delete_profile, read_current_env,

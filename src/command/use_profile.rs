@@ -5,10 +5,10 @@ use crate::error::CsError;
 use crate::input;
 use crate::output;
 use crate::store::{read_profile, merge_env, clear_env, write_current, read_settings_local, write_settings_local, has_claude_dir,
-                   read_user_settings, write_user_settings, write_user_current, CLAUDE_PROFILE_NAME};
+                   read_user_settings, write_user_settings, write_user_current, is_builtin, CLAUDE_PROFILE_NAME};
 
 pub fn run(name: &str, project: &Path) -> Result<(), CsError> {
-    if name == CLAUDE_PROFILE_NAME {
+    if is_builtin(name) {
         return run_claude_project(project);
     }
     validate_name(name)?;
@@ -37,7 +37,7 @@ pub fn run(name: &str, project: &Path) -> Result<(), CsError> {
 }
 
 pub fn run_user(name: &str) -> Result<(), CsError> {
-    if name == CLAUDE_PROFILE_NAME {
+    if is_builtin(name) {
         return run_claude_user();
     }
     validate_name(name)?;

@@ -2,13 +2,13 @@ use std::path::Path;
 
 use crate::error::CsError;
 use crate::output;
-use crate::store::{read_current, read_user_current, CLAUDE_PROFILE_NAME};
+use crate::store::{read_current, read_user_current, is_builtin};
 
 pub fn run(project: &Path) -> Result<(), CsError> {
     let current = read_current(project)?;
 
     match current {
-        Some(name) if name == CLAUDE_PROFILE_NAME => {
+        Some(name) if is_builtin(&name) => {
             output::success("Current profile: claude (default Claude provider)");
         }
         Some(name) => output::success(&format!("Current profile: {}", name)),
@@ -21,7 +21,7 @@ pub fn run_user() -> Result<(), CsError> {
     let current = read_user_current()?;
 
     match current {
-        Some(name) if name == CLAUDE_PROFILE_NAME => {
+        Some(name) if is_builtin(&name) => {
             output::success("Current profile (user): claude (default Claude provider)");
         }
         Some(name) => output::success(&format!("Current profile (user): {}", name)),
