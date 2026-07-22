@@ -158,12 +158,6 @@ fn test_save_and_read_profile() {
 }
 
 #[test]
-fn test_save_profile_rejects_invalid_name() {
-    let _store = setup_store();
-    assert!(cp_switch::cli::validate_name("bad.name").is_err());
-}
-
-#[test]
 fn test_read_nonexistent_profile() {
     let _store = setup_store();
     assert!(cp_switch::store::read_profile("nonexistent").is_err());
@@ -237,41 +231,52 @@ fn test_merge_malformed_settings_env() {
     assert!(result.is_err());
 }
 
-#[test]
-fn test_merge_removes_auth_token_when_api_key_set() {
-    // settings 有 AUTH_TOKEN，profile 有 API_KEY → AUTH_TOKEN 被清除
-    let settings = serde_json::json!({"env":{"ANTHROPIC_AUTH_TOKEN":"tok-old","ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_MODEL":"old"}});
-    let profile_env = serde_json::json!({"ANTHROPIC_API_KEY":"sk-new","ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_MODEL":"new"});
-    let (merged, written, removed) = cp_switch::store::merge_env(settings, &profile_env).unwrap();
-    let env_obj = merged.get("env").unwrap().as_object().unwrap();
-    assert!(!env_obj.contains_key("ANTHROPIC_AUTH_TOKEN"));
-    assert_eq!(env_obj.get("ANTHROPIC_API_KEY").unwrap(), "sk-new");
-    assert!(removed.contains(&"ANTHROPIC_AUTH_TOKEN".to_string()));
-    assert!(written.contains(&"ANTHROPIC_API_KEY".to_string()));
-}
+// ============================================================
+// clear_env 纯函数测试
+// ============================================================
 
 #[test]
-fn test_merge_preserves_auth_token_when_no_auth_key() {
-    // profile 无 API_KEY/AUTH_TOKEN → 但 AUTH_TOKEN 是受管理的 key，仍被清除
-    let settings = serde_json::json!({"env":{"ANTHROPIC_AUTH_TOKEN":"tok-keep","ANTHROPIC_BASE_URL":"https://old","OTHER":"keep"}});
-    let profile_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_MODEL":"new"});
-    let (merged, _, removed) = cp_switch::store::merge_env(settings, &profile_env).unwrap();
+fn test_clear_env_removes_all_managed_keys() {
+    let settings = serde_json::json!({
+        "permissions": {"allow": ["Bash"]},
+        "env": {
+            "ANTHROPIC_BASE_URL": "https://x",
+            "ANTHROPIC_API_KEY": "sk-x",
+            "ANTHROPIC_AUTH_TOKEN": "tok-x",
+            "ANTHROPIC_MODEL": "x",
+            "ANTHROPIC_SMALL_FAST_MODEL": "x",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "x",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "x",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "x",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "x",
+            "CLAUDE_CODE_EFFORT_LEVEL": "high",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "50",
+            "API_TIMEOUT_MS": "3000",
+            "OTHER": "keep"
+        }
+    });
+    let (merged, removed) = cp_switch::store::clear_env(settings).unwrap();
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
-    assert!(env_obj.get("ANTHROPIC_AUTH_TOKEN").is_none()); // 受管理 key，已清除
+    // 11 个 managed key 都被清除
+    assert!(env_obj.get("ANTHROPIC_BASE_URL").is_none());
+    assert!(env_obj.get("ANTHROPIC_API_KEY").is_none());
+    assert!(env_obj.get("ANTHROPIC_AUTH_TOKEN").is_none());
+    assert!(env_obj.get("ANTHROPIC_MODEL").is_none());
+    assert!(env_obj.get("ANTHROPIC_SMALL_FAST_MODEL").is_none());
+    assert!(env_obj.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").is_none());
+    assert!(env_obj.get("ANTHROPIC_DEFAULT_SONNET_MODEL").is_none());
+    assert!(env_obj.get("ANTHROPIC_DEFAULT_OPUS_MODEL").is_none());
+    assert!(env_obj.get("CLAUDE_CODE_SUBAGENT_MODEL").is_none());
+    assert!(env_obj.get("CLAUDE_CODE_EFFORT_LEVEL").is_none());
+    assert!(env_obj.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW").is_none());
+    // 非 managed key 保留
+    assert_eq!(env_obj.get("API_TIMEOUT_MS").unwrap(), "3000");
     assert_eq!(env_obj.get("OTHER").unwrap(), "keep");
-    assert!(removed.contains(&"ANTHROPIC_AUTH_TOKEN".to_string()));
-}
-
-#[test]
-fn test_merge_removes_api_key_when_auth_token_set() {
-    // 反向：profile 有 AUTH_TOKEN，settings 有 API_KEY → API_KEY 被清除
-    let settings = serde_json::json!({"env":{"ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_BASE_URL":"https://old"}});
-    let profile_env = serde_json::json!({"ANTHROPIC_AUTH_TOKEN":"tok-new","ANTHROPIC_BASE_URL":"https://new"});
-    let (merged, _, removed) = cp_switch::store::merge_env(settings, &profile_env).unwrap();
-    let env_obj = merged.get("env").unwrap().as_object().unwrap();
-    assert!(!env_obj.contains_key("ANTHROPIC_API_KEY"));
-    assert_eq!(env_obj.get("ANTHROPIC_AUTH_TOKEN").unwrap(), "tok-new");
-    assert!(removed.contains(&"ANTHROPIC_API_KEY".to_string()));
+    assert_eq!(env_obj.len(), 2);
+    // permissions 保留
+    assert!(merged.get("permissions").is_some());
+    // removed 列表包含所有清掉的 key
+    assert_eq!(removed.len(), 11);
 }
 
 // ============================================================
@@ -329,28 +334,6 @@ fn test_read_current_env_no_env_field() {
     let _store = setup_store();
     let dir = setup_project(r#"{"permissions":{}}"#);
     assert_eq!(cp_switch::store::read_current_env(dir.path()).unwrap(), serde_json::json!({}));
-}
-
-#[test]
-fn test_diff_identical() {
-    let _store = setup_store();
-    let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_MODEL":"x"}}"#);
-    let env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_MODEL":"x"});
-    cp_switch::store::save_profile("same", &env).unwrap();
-    assert_eq!(cp_switch::store::read_current_env(dir.path()).unwrap(), env);
-}
-
-#[test]
-fn test_diff_shows_changes() {
-    let _store = setup_store();
-    let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_MODEL":"old"}}"#);
-    let env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_MODEL":"new","ANTHROPIC_API_KEY":"sk"});
-    cp_switch::store::save_profile("new", &env).unwrap();
-
-    let current = cp_switch::store::read_current_env(dir.path()).unwrap();
-    let profile = cp_switch::store::read_profile("new").unwrap();
-    assert_ne!(current, profile);
-    assert!(profile.as_object().unwrap().contains_key("ANTHROPIC_API_KEY"));
 }
 
 // ============================================================
@@ -661,39 +644,6 @@ fn test_cli_add_empty_required_retries() {
     assert_eq!(profile.get("ANTHROPIC_BASE_URL").unwrap(), "https://a.com");
 }
 
-#[test]
-fn test_full_workflow() {
-    let _store = setup_store();
-    let dir = setup_project(r#"{"permissions":{"allow":["Bash"]},"env":{"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_API_KEY":"sk-a","ANTHROPIC_MODEL":"a","ANTHROPIC_SMALL_FAST_MODEL":"a","API_TIMEOUT_MS":"3000"}}"#);
-    let project = dir.path();
-
-    let a_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_API_KEY":"sk-a","ANTHROPIC_MODEL":"a","ANTHROPIC_SMALL_FAST_MODEL":"a"});
-    cp_switch::store::save_profile("a", &a_env).unwrap();
-
-    let b_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://b","ANTHROPIC_API_KEY":"sk-b","ANTHROPIC_MODEL":"b","ANTHROPIC_DEFAULT_OPUS_MODEL":"opus"});
-    cp_switch::store::save_profile("b", &b_env).unwrap();
-
-    // 切到 b
-    let settings = cp_switch::store::read_settings_local(project).unwrap();
-    let (merged, _, _) = cp_switch::store::merge_env(settings, &b_env).unwrap();
-    cp_switch::store::write_settings_local(project, &merged).unwrap();
-    let settings = read_settings(project);
-    let env_obj = get_env_obj(&settings);
-    assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://b");
-    assert!(env_obj.get("ANTHROPIC_SMALL_FAST_MODEL").is_none()); // 受管理 key，已清除
-    assert_eq!(env_obj.get("API_TIMEOUT_MS").unwrap(), "3000");
-
-    // 切回 a
-    let a_profile = cp_switch::store::read_profile("a").unwrap();
-    let settings = cp_switch::store::read_settings_local(project).unwrap();
-    let (merged, _, _) = cp_switch::store::merge_env(settings, &a_profile).unwrap();
-    cp_switch::store::write_settings_local(project, &merged).unwrap();
-    let settings = read_settings(project);
-    let env_obj = get_env_obj(&settings);
-    assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://a");
-    assert!(env_obj.get("ANTHROPIC_DEFAULT_OPUS_MODEL").is_none()); // 不在 profile a 中的受管理 key，已清除
-}
-
 // ============================================================
 // 补充场景测试
 // ============================================================
@@ -841,15 +791,6 @@ fn test_cli_list_shows_outdated_when_profile_updated() {
     let out = combined_output(&stdout, &stderr);
     assert!(out.contains("(active)"));
     assert!(!out.contains("outdated"));
-}
-
-#[test]
-fn test_cli_version() {
-    let _store = setup_store();
-    let dir = setup_project(r#"{"env":{"ANTHROPIC_MODEL":"x"}}"#);
-    let (ok, stdout, _) = run_cli("--version", dir.path());
-    assert!(ok);
-    assert!(stdout.contains("0.1.0"));
 }
 
 #[test]
@@ -1005,6 +946,96 @@ fn test_write_settings_backup_overwrites_on_successive_use() {
     run_cli("use b", dir.path());
     let bak2: serde_json::Value = serde_json::from_str(&fs::read_to_string(&bak_path).unwrap()).unwrap();
     assert_eq!(bak2.get("env").unwrap().get("ANTHROPIC_BASE_URL").unwrap(), "https://a");
+}
+
+// ============================================================
+// state.json 存储测试
+// ============================================================
+
+#[test]
+fn test_state_migration_from_old_format() {
+    let _store = setup_store();
+    let store_dir = std::path::PathBuf::from(store_dir_val());
+
+    // 创建旧版 profiles/ 目录和文件
+    let profiles_dir = store_dir.join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+
+    let work_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://work.com","ANTHROPIC_API_KEY":"sk-work"});
+    fs::write(profiles_dir.join("work.json"), serde_json::to_string(&work_env).unwrap()).unwrap();
+
+    let home_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://home.com","ANTHROPIC_API_KEY":"sk-home"});
+    fs::write(profiles_dir.join("home.json"), serde_json::to_string(&home_env).unwrap()).unwrap();
+
+    // 创建旧版用户级 current
+    fs::write(store_dir.join("current"), "work").unwrap();
+
+    // 创建旧版 project current（用虚拟 hash 目录）
+    fs::create_dir_all(store_dir.join("projects").join("abcd1234")).unwrap();
+    fs::write(store_dir.join("projects/abcd1234/current"), "home").unwrap();
+
+    // 触发迁移：list_profiles 会调用 read_state → try_migrate
+    let profiles = cp_switch::store::list_profiles().unwrap();
+    assert_eq!(profiles, vec!["home", "work"]);
+
+    // state.json 已创建
+    let state_path = store_dir.join("state.json");
+    assert!(state_path.exists());
+
+    // 旧目录已被清理
+    assert!(!profiles_dir.exists());
+    assert!(!store_dir.join("projects").exists());
+    assert!(!store_dir.join("current").exists());
+
+    // state.json 内容正确
+    let state_content: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    let profiles_obj = state_content.get("profiles").unwrap().as_object().unwrap();
+    assert_eq!(profiles_obj.len(), 2);
+    assert_eq!(
+        profiles_obj.get("work").unwrap().get("ANTHROPIC_BASE_URL").unwrap(),
+        "https://work.com"
+    );
+    assert_eq!(state_content.get("user_current").unwrap(), "work");
+    // project_currents 不迁移（旧版用不可逆的 hash 路径），字段为空则被跳过
+    assert!(state_content.get("project_currents").is_none());
+}
+
+#[test]
+fn test_state_json_corrupted() {
+    let _store = setup_store();
+    let store_path = store_dir_val();
+    let state_path = std::path::Path::new(&store_path).join("state.json");
+
+    // 直接写入非法 JSON
+    fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+    fs::write(&state_path, "{invalid json!!!}").unwrap();
+
+    // 读取应报错，不 panic
+    let result = cp_switch::store::list_profiles();
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_state_json_fresh_creates_default() {
+    let _store = setup_store();
+
+    // 干净的目录，无旧格式也无 state.json
+    // list_profiles 应返回空列表而不是报错
+    let profiles = cp_switch::store::list_profiles().unwrap();
+    assert!(profiles.is_empty());
+
+    // state.json 被自动创建
+    let store_path = store_dir_val();
+    let state_path = std::path::Path::new(&store_path).join("state.json");
+    assert!(state_path.exists());
+
+    // 内容是合法的空 state（空 map 被 skip_serializing_if 跳过）
+    let state_content: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    assert!(state_content.get("profiles").is_none());
+    assert!(state_content.get("project_currents").is_none());
+    assert!(state_content.get("user_current").is_none());
 }
 
 // ============================================================
@@ -1466,4 +1497,33 @@ fn test_cli_edit_claude_rejected() {
     let (ok, _, stderr) = run_cli("edit claude", dir.path());
     assert!(!ok);
     assert!(stderr.contains("Invalid profile name"));
+}
+
+#[test]
+fn test_cli_edit_updates_profile() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 先 add 一个 profile
+    let add_input = "https://old.com\nsk-old\nold-model\n\n\n\n\n";
+    let (ok, _, stderr) = run_cli_stdin("add edit-me", add_input, dir.path());
+    assert!(ok, "add failed: {}", stderr);
+
+    // verify initial values
+    let profile = cp_switch::store::read_profile("edit-me").unwrap();
+    assert_eq!(profile.get("ANTHROPIC_BASE_URL").unwrap(), "https://old.com");
+    assert_eq!(profile.get("ANTHROPIC_API_KEY").unwrap(), "sk-old");
+
+    // 编辑为新的值
+    let edit_input = "https://new.com\nsk-new\nnew-model\n\n\n\n\n";
+    let (ok, stdout, stderr) = run_cli_stdin("edit edit-me", edit_input, dir.path());
+    assert!(ok, "edit failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("Updated profile 'edit-me'"));
+
+    // 验证值已更新
+    let profile = cp_switch::store::read_profile("edit-me").unwrap();
+    assert_eq!(profile.get("ANTHROPIC_BASE_URL").unwrap(), "https://new.com");
+    assert_eq!(profile.get("ANTHROPIC_API_KEY").unwrap(), "sk-new");
+    assert_eq!(profile.get("ANTHROPIC_MODEL").unwrap(), "new-model");
 }
