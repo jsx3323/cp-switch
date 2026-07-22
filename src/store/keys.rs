@@ -10,7 +10,7 @@ pub const KEY_SUBAGENT_MODEL: &str = "CLAUDE_CODE_SUBAGENT_MODEL";
 pub const KEY_EFFORT_LEVEL: &str = "CLAUDE_CODE_EFFORT_LEVEL";
 pub const KEY_AUTO_COMPACT_WINDOW: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
-pub const BLANK_PROFILE_NAME: &str = "blank";
+pub const CLAUDE_PROFILE_NAME: &str = "claude";
 
 /// 所有需要被 profile 管理的 key 前缀
 const MANAGED_PREFIXES: &[&str] = &["ANTHROPIC_", "CLAUDE_CODE_"];

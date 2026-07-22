@@ -5,11 +5,11 @@ use crate::error::CsError;
 use crate::input;
 use crate::output;
 use crate::store::{read_profile, merge_env, clear_env, write_current, read_settings_local, write_settings_local, has_claude_dir,
-                   read_user_settings, write_user_settings, write_user_current, BLANK_PROFILE_NAME};
+                   read_user_settings, write_user_settings, write_user_current, CLAUDE_PROFILE_NAME};
 
 pub fn run(name: &str, project: &Path) -> Result<(), CsError> {
-    if name == BLANK_PROFILE_NAME {
-        return run_blank_project(project);
+    if name == CLAUDE_PROFILE_NAME {
+        return run_claude_project(project);
     }
     validate_name(name)?;
 
@@ -37,8 +37,8 @@ pub fn run(name: &str, project: &Path) -> Result<(), CsError> {
 }
 
 pub fn run_user(name: &str) -> Result<(), CsError> {
-    if name == BLANK_PROFILE_NAME {
-        return run_blank_user();
+    if name == CLAUDE_PROFILE_NAME {
+        return run_claude_user();
     }
     validate_name(name)?;
 
@@ -58,13 +58,13 @@ pub fn run_user(name: &str) -> Result<(), CsError> {
     Ok(())
 }
 
-fn run_blank_project(project: &Path) -> Result<(), CsError> {
+fn run_claude_project(project: &Path) -> Result<(), CsError> {
     let settings = read_settings_local(project)?;
     let (merged, removed) = clear_env(settings)?;
     write_settings_local(project, &merged)?;
-    write_current(project, BLANK_PROFILE_NAME)?;
+    write_current(project, CLAUDE_PROFILE_NAME)?;
 
-    output::success("Cleared all managed env vars (blank profile)");
+    output::success("Switched to default Claude provider");
     for key in &removed {
         output::removed(key);
     }
@@ -74,13 +74,13 @@ fn run_blank_project(project: &Path) -> Result<(), CsError> {
     Ok(())
 }
 
-fn run_blank_user() -> Result<(), CsError> {
+fn run_claude_user() -> Result<(), CsError> {
     let settings = read_user_settings()?;
     let (merged, removed) = clear_env(settings)?;
     write_user_settings(&merged)?;
-    write_user_current(BLANK_PROFILE_NAME)?;
+    write_user_current(CLAUDE_PROFILE_NAME)?;
 
-    output::success("Cleared all managed env vars (blank profile)");
+    output::success("Switched to default Claude provider");
     for key in &removed {
         output::removed(key);
     }

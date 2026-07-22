@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::error::CsError;
-use crate::store::BLANK_PROFILE_NAME;
+use crate::store::CLAUDE_PROFILE_NAME;
 
 #[derive(Parser)]
 #[command(name = "cp-switch")]
@@ -82,7 +82,7 @@ pub fn validate_name(name: &str) -> Result<(), CsError> {
 }
 
 pub fn ensure_not_reserved(name: &str) -> Result<(), CsError> {
-    if name == BLANK_PROFILE_NAME {
+    if name == CLAUDE_PROFILE_NAME {
         return Err(CsError::InvalidProfileName { name: name.into() });
     }
     Ok(())
