@@ -12,36 +12,28 @@ pub const KEY_AUTO_COMPACT_WINDOW: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
 pub const CLAUDE_PROFILE_NAME: &str = "claude";
 
-/// 所有需要被 profile 管理的 key 前缀
-const MANAGED_PREFIXES: &[&str] = &["ANTHROPIC_", "CLAUDE_CODE_"];
-
-/// 互斥 key 组：组内任一 key 出现在 profile 时，settings 中组内其他 key 应被清除
-pub const CONFLICT_GROUPS: &[&[&str]] = &[
-    &[KEY_API_KEY, KEY_AUTH_TOKEN],
+/// 精确白名单：仅这 11 个 key 被 cp-switch 管理
+const MANAGED_KEYS: &[&str] = &[
+    KEY_BASE_URL,
+    KEY_API_KEY,
+    KEY_AUTH_TOKEN,
+    KEY_MODEL,
+    KEY_SMALL_FAST_MODEL,
+    KEY_DEFAULT_HAIKU,
+    KEY_DEFAULT_SONNET,
+    KEY_DEFAULT_OPUS,
+    KEY_SUBAGENT_MODEL,
+    KEY_EFFORT_LEVEL,
+    KEY_AUTO_COMPACT_WINDOW,
 ];
 
 pub fn is_claude_env_key(key: &str) -> bool {
-    MANAGED_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+    MANAGED_KEYS.iter().any(|managed| *managed == key)
 }
 
 /// 判断是否为内置 profile 名称
 pub fn is_builtin(name: &str) -> bool {
     name == CLAUDE_PROFILE_NAME
-}
-
-/// 返回 settings 中应被清除的冲突 key（组内不在 profile 中的 key）
-pub(crate) fn conflicting_keys(profile_env: &serde_json::Map<String, serde_json::Value>) -> Vec<&str> {
-    let mut result = Vec::new();
-    for group in CONFLICT_GROUPS.iter() {
-        if group.iter().any(|k| profile_env.contains_key(*k)) {
-            for key in group.iter() {
-                if !profile_env.contains_key(*key) {
-                    result.push(*key);
-                }
-            }
-        }
-    }
-    result
 }
 
 pub fn derive_default_models(model: &str) -> [(String, String); 4] {

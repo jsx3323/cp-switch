@@ -117,12 +117,23 @@ fn test_validate_name() {
 
 #[test]
 fn test_is_claude_env_key() {
+    // 精确管理的 11 个 key
     assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_BASE_URL"));
-    assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_MODEL"));
     assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_API_KEY"));
     assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_AUTH_TOKEN"));
+    assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_MODEL"));
+    assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_SMALL_FAST_MODEL"));
+    assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_DEFAULT_HAIKU_MODEL"));
+    assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_DEFAULT_SONNET_MODEL"));
+    assert!(cp_switch::store::is_claude_env_key("ANTHROPIC_DEFAULT_OPUS_MODEL"));
     assert!(cp_switch::store::is_claude_env_key("CLAUDE_CODE_SUBAGENT_MODEL"));
     assert!(cp_switch::store::is_claude_env_key("CLAUDE_CODE_EFFORT_LEVEL"));
+    assert!(cp_switch::store::is_claude_env_key("CLAUDE_CODE_AUTO_COMPACT_WINDOW"));
+    // 前缀相同但不在白名单内的
+    assert!(!cp_switch::store::is_claude_env_key("ANTHROPIC_OTHER"));
+    assert!(!cp_switch::store::is_claude_env_key("CLAUDE_CODE_FOO"));
+    assert!(!cp_switch::store::is_claude_env_key("ANTHROPIC_"));
+    // 完全不相关的
     assert!(!cp_switch::store::is_claude_env_key("API_TIMEOUT_MS"));
 }
 
@@ -179,7 +190,7 @@ fn test_merge_clears_old_keys_and_writes_new() {
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://new");
     assert_eq!(env_obj.get("ANTHROPIC_API_KEY").unwrap(), "sk-new");
-    assert_eq!(env_obj.get("ANTHROPIC_SMALL_FAST_MODEL").unwrap(), "old-model"); // 保留，不删除
+    assert!(env_obj.get("ANTHROPIC_SMALL_FAST_MODEL").is_none()); // 受管理 key，已清除
     assert_eq!(env_obj.get("API_TIMEOUT_MS").unwrap(), "3000");
     assert!(merged.get("permissions").is_some());
 }
@@ -241,13 +252,14 @@ fn test_merge_removes_auth_token_when_api_key_set() {
 
 #[test]
 fn test_merge_preserves_auth_token_when_no_auth_key() {
-    // profile 无 API_KEY/AUTH_TOKEN → AUTH_TOKEN 保留
+    // profile 无 API_KEY/AUTH_TOKEN → 但 AUTH_TOKEN 是受管理的 key，仍被清除
     let settings = serde_json::json!({"env":{"ANTHROPIC_AUTH_TOKEN":"tok-keep","ANTHROPIC_BASE_URL":"https://old","OTHER":"keep"}});
     let profile_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_MODEL":"new"});
     let (merged, _, removed) = cp_switch::store::merge_env(settings, &profile_env).unwrap();
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
-    assert_eq!(env_obj.get("ANTHROPIC_AUTH_TOKEN").unwrap(), "tok-keep");
-    assert!(removed.is_empty());
+    assert!(env_obj.get("ANTHROPIC_AUTH_TOKEN").is_none()); // 受管理 key，已清除
+    assert_eq!(env_obj.get("OTHER").unwrap(), "keep");
+    assert!(removed.contains(&"ANTHROPIC_AUTH_TOKEN".to_string()));
 }
 
 #[test]
@@ -527,7 +539,7 @@ fn test_cli_use_writes_settings_and_preserves_non_anthropic() {
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://new");
     assert_eq!(env_obj.get("ANTHROPIC_API_KEY").unwrap(), "sk-new");
     assert_eq!(env_obj.get("ANTHROPIC_MODEL").unwrap(), "new");
-    assert_eq!(env_obj.get("ANTHROPIC_SMALL_FAST_MODEL").unwrap(), "old-fast"); // 不在冲突组，保留
+    assert!(env_obj.get("ANTHROPIC_SMALL_FAST_MODEL").is_none()); // 受管理 key，已清除
     assert_eq!(env_obj.get("API_TIMEOUT_MS").unwrap(), "3000");   // 非 ANTHROPIC_* 保留
     assert!(settings.get("permissions").is_some());                // permissions 保留
 }
@@ -543,7 +555,7 @@ fn test_cli_use_switch_back_preserves_env() {
     run_cli("use b", dir.path());
     let settings = read_settings(dir.path());
     assert_eq!(settings.get("env").unwrap().get("ANTHROPIC_BASE_URL").unwrap(), "https://b");
-    assert_eq!(settings.get("env").unwrap().get("ANTHROPIC_SMALL_FAST_MODEL").unwrap(), "a"); // 保留
+    assert!(settings.get("env").unwrap().get("ANTHROPIC_SMALL_FAST_MODEL").is_none()); // 受管理 key，已清除
     assert_eq!(settings.get("env").unwrap().get("OTHER").unwrap(), "keep");
 
     run_cli("use a", dir.path());
@@ -668,7 +680,7 @@ fn test_full_workflow() {
     let settings = read_settings(project);
     let env_obj = get_env_obj(&settings);
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://b");
-    assert_eq!(env_obj.get("ANTHROPIC_SMALL_FAST_MODEL").unwrap(), "a"); // 保留，不在冲突组
+    assert!(env_obj.get("ANTHROPIC_SMALL_FAST_MODEL").is_none()); // 受管理 key，已清除
     assert_eq!(env_obj.get("API_TIMEOUT_MS").unwrap(), "3000");
 
     // 切回 a
@@ -679,7 +691,7 @@ fn test_full_workflow() {
     let settings = read_settings(project);
     let env_obj = get_env_obj(&settings);
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://a");
-    assert_eq!(env_obj.get("ANTHROPIC_DEFAULT_OPUS_MODEL").unwrap(), "opus"); // 保留
+    assert!(env_obj.get("ANTHROPIC_DEFAULT_OPUS_MODEL").is_none()); // 不在 profile a 中的受管理 key，已清除
 }
 
 // ============================================================
