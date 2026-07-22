@@ -196,6 +196,21 @@ fn test_merge_clears_old_keys_and_writes_new() {
 }
 
 #[test]
+fn test_merge_removed_excludes_overwritten_keys() {
+    // removed 只报告旧 env 中受管理、且 profile 未重新写入的 key；
+    // 被 profile 覆盖的 key（BASE_URL/API_KEY）不应出现在 removed 中
+    let settings = serde_json::json!({"env":{
+        "ANTHROPIC_BASE_URL":"https://old",
+        "ANTHROPIC_API_KEY":"sk-old",
+        "ANTHROPIC_SMALL_FAST_MODEL":"old",
+        "OTHER":"keep"}});
+    let new_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_API_KEY":"sk-new","ANTHROPIC_DEFAULT_HAIKU_MODEL":"haiku"});
+    let (_merged, _written, mut removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
+    removed.sort();
+    assert_eq!(removed, vec!["ANTHROPIC_SMALL_FAST_MODEL".to_string()]);
+}
+
+#[test]
 fn test_merge_switch_back_and_forth() {
     let a_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_API_KEY":"sk-a","ANTHROPIC_MODEL":"a"});
     let b_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://b","ANTHROPIC_API_KEY":"sk-b","ANTHROPIC_MODEL":"b"});
