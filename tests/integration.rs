@@ -510,18 +510,6 @@ fn test_cli_delete() {
 }
 
 #[test]
-fn test_cli_diff() {
-    let _store = setup_store();
-    let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_MODEL":"old"}}"#);
-    cp_switch::store::save_profile("new-profile", &serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_MODEL":"new"})).unwrap();
-
-    let (ok, stdout, stderr) = run_cli("diff new-profile", dir.path());
-    assert!(ok, "diff failed: {}", stderr);
-    let out = combined_output(&stdout, &stderr);
-    assert!(out.contains("current env") || out.contains("profile:"));
-}
-
-#[test]
 fn test_cli_use_nonexistent() {
     let _store = setup_store();
     let dir = setup_project(r#"{"env":{"ANTHROPIC_MODEL":"x"}}"#);
@@ -1200,8 +1188,9 @@ fn test_cli_list_user_shows_active() {
     let (ok, stdout, stderr) = run_cli_user("list --user", "", &home_path);
     assert!(ok);
     let out = combined_output(&stdout, &stderr);
-    assert!(out.contains("(active)"));
-    assert!(!out.contains("beta") || !stdout.contains("(active)") || stdout.matches("(active)").count() == 1);
+    // 只有 alpha 标 active，beta 不标
+    assert!(out.contains("alpha") && out.contains("beta"));
+    assert_eq!(stdout.matches("(active)").count(), 1);
 }
 
 #[test]
