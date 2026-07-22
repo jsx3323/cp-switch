@@ -4,10 +4,13 @@ use crate::cli::validate_name;
 use crate::error::CsError;
 use crate::input;
 use crate::output;
-use crate::store::{read_profile, merge_env, write_current, read_settings_local, write_settings_local, has_claude_dir,
-                   read_user_settings, write_user_settings, write_user_current};
+use crate::store::{read_profile, merge_env, clear_env, write_current, read_settings_local, write_settings_local, has_claude_dir,
+                   read_user_settings, write_user_settings, write_user_current, BLANK_PROFILE_NAME};
 
 pub fn run(name: &str, project: &Path) -> Result<(), CsError> {
+    if name == BLANK_PROFILE_NAME {
+        return run_blank_project(project);
+    }
     validate_name(name)?;
 
     if !has_claude_dir(project) {
@@ -34,6 +37,9 @@ pub fn run(name: &str, project: &Path) -> Result<(), CsError> {
 }
 
 pub fn run_user(name: &str) -> Result<(), CsError> {
+    if name == BLANK_PROFILE_NAME {
+        return run_blank_user();
+    }
     validate_name(name)?;
 
     let env_values = read_profile(name)?;
@@ -48,6 +54,38 @@ pub fn run_user(name: &str) -> Result<(), CsError> {
     }
     for key in &removed {
         output::removed(key);
+    }
+    Ok(())
+}
+
+fn run_blank_project(project: &Path) -> Result<(), CsError> {
+    let settings = read_settings_local(project)?;
+    let (merged, removed) = clear_env(settings)?;
+    write_settings_local(project, &merged)?;
+    write_current(project, BLANK_PROFILE_NAME)?;
+
+    output::success("Cleared all managed env vars (blank profile)");
+    for key in &removed {
+        output::removed(key);
+    }
+    if removed.is_empty() {
+        output::info("  (no managed env vars to clear)");
+    }
+    Ok(())
+}
+
+fn run_blank_user() -> Result<(), CsError> {
+    let settings = read_user_settings()?;
+    let (merged, removed) = clear_env(settings)?;
+    write_user_settings(&merged)?;
+    write_user_current(BLANK_PROFILE_NAME)?;
+
+    output::success("Cleared all managed env vars (blank profile)");
+    for key in &removed {
+        output::removed(key);
+    }
+    if removed.is_empty() {
+        output::info("  (no managed env vars to clear)");
     }
     Ok(())
 }

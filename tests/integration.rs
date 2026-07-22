@@ -1284,3 +1284,175 @@ fn test_cli_use_user_and_project_independent() {
     let user_env_obj = get_env_obj(&user_settings);
     assert_eq!(user_env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://usr");
 }
+
+// ============================================================
+// 空白模板（blank）测试
+// ============================================================
+
+#[test]
+fn test_cli_add_blank_rejected() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    let (ok, _, stderr) = run_cli("add blank", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("Invalid profile name"));
+}
+
+#[test]
+fn test_cli_delete_blank_rejected() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    let (ok, _, stderr) = run_cli("delete blank", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("Invalid profile name"));
+}
+
+#[test]
+fn test_cli_use_blank_clears_env() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"permissions":{"allow":["Bash(ls)"]},"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old","ANTHROPIC_SMALL_FAST_MODEL":"old","API_TIMEOUT_MS":"3000","OTHER":"keep"}}"#);
+
+    let (ok, stdout, stderr) = run_cli("use blank", dir.path());
+    assert!(ok, "use blank failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("blank"));
+
+    // 验证 managed keys 被清除，非 managed keys 保留
+    let settings = read_settings(dir.path());
+    let env_obj = get_env_obj(&settings);
+    assert!(!env_obj.contains_key("ANTHROPIC_BASE_URL"));
+    assert!(!env_obj.contains_key("ANTHROPIC_API_KEY"));
+    assert!(!env_obj.contains_key("ANTHROPIC_MODEL"));
+    assert!(!env_obj.contains_key("ANTHROPIC_SMALL_FAST_MODEL"));
+    assert!(env_obj.contains_key("API_TIMEOUT_MS"));
+    assert!(env_obj.contains_key("OTHER"));
+    assert_eq!(env_obj.get("API_TIMEOUT_MS").unwrap(), "3000");
+    assert_eq!(env_obj.get("OTHER").unwrap(), "keep");
+
+    // permissions 保留
+    assert!(settings.get("permissions").is_some());
+
+    // current 标记为 blank
+    assert_eq!(cp_switch::store::read_current(dir.path()).unwrap(), Some("blank".to_string()));
+}
+
+#[test]
+fn test_cli_use_blank_user() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    // 预设用户 settings
+    let claude_dir = home_path.join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(claude_dir.join("settings.json"), r#"{"permissions":{"allow":["Bash"]},"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old","OTHER":"keep"}}"#).unwrap();
+
+    let (ok, stdout, stderr) = run_cli_user("use --user blank", "", &home_path);
+    assert!(ok, "use --user blank failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("blank"));
+
+    // 验证 managed keys 被清除
+    let user_settings = read_user_settings(&home_path);
+    let env_obj = get_env_obj(&user_settings);
+    assert!(!env_obj.contains_key("ANTHROPIC_BASE_URL"));
+    assert!(!env_obj.contains_key("ANTHROPIC_API_KEY"));
+    assert!(!env_obj.contains_key("ANTHROPIC_MODEL"));
+    assert!(env_obj.contains_key("OTHER"));
+    assert_eq!(env_obj.get("OTHER").unwrap(), "keep");
+
+    // permissions 保留
+    assert!(user_settings.get("permissions").is_some());
+
+    // 用户级 current 标记为 blank
+    assert_eq!(cp_switch::store::read_user_current().unwrap(), Some("blank".to_string()));
+}
+
+#[test]
+fn test_cli_use_blank_then_switch_back() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"permissions":{"allow":["Bash"]},"env":{"ANTHROPIC_BASE_URL":"https://original","ANTHROPIC_API_KEY":"sk-original","ANTHROPIC_MODEL":"original","API_TIMEOUT_MS":"5000"}}"#);
+
+    // 创建 profile
+    cp_switch::store::save_profile("work", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://work", "ANTHROPIC_API_KEY": "sk-work", "ANTHROPIC_MODEL": "work"
+    })).unwrap();
+
+    // 先 use blank 清空
+    run_cli("use blank", dir.path());
+    let settings = read_settings(dir.path());
+    let env_obj = get_env_obj(&settings);
+    assert!(!env_obj.contains_key("ANTHROPIC_BASE_URL"));
+
+    // 再切回 work — 非 managed key 仍保留
+    let (ok, _, stderr) = run_cli("use work", dir.path());
+    assert!(ok, "use work after blank failed: {}", stderr);
+    let settings = read_settings(dir.path());
+    let env_obj = get_env_obj(&settings);
+    assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://work");
+    assert_eq!(env_obj.get("API_TIMEOUT_MS").unwrap(), "5000");
+}
+
+#[test]
+fn test_cli_use_blank_on_clean_project() {
+    let _store = setup_store();
+    // 新项目连 .claude 目录都没有
+    let dir = tempfile::tempdir().unwrap();
+    assert!(!dir.path().join(".claude").exists());
+
+    // use blank 需要确认创建 .claude
+    let (ok, stdout, stderr) = run_cli_stdin("use blank", "y\n", dir.path());
+    assert!(ok, "use blank on clean project failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("blank"));
+
+    // .claude 被创建
+    assert!(dir.path().join(".claude/settings.local.json").exists());
+    let settings = read_settings(dir.path());
+    // 没有 managed keys
+    let env_obj = get_env_obj(&settings);
+    assert!(!env_obj.contains_key("ANTHROPIC_BASE_URL"));
+    assert_eq!(env_obj.len(), 0);
+
+    // current 标记为 blank
+    assert_eq!(cp_switch::store::read_current(dir.path()).unwrap(), Some("blank".to_string()));
+}
+
+#[test]
+fn test_cli_list_shows_blank_active() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // use blank
+    run_cli("use blank", dir.path());
+
+    // list 应显示 blank 为 active
+    let (ok, stdout, stderr) = run_cli("list", dir.path());
+    assert!(ok, "list failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("blank"));
+    assert!(out.contains("(active)"));
+}
+
+#[test]
+fn test_cli_current_blank() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    run_cli("use blank", dir.path());
+
+    let (ok, stdout, stderr) = run_cli("current", dir.path());
+    assert!(ok, "current failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("blank"));
+    assert!(out.contains("cleared"));
+}
+
+#[test]
+fn test_cli_edit_blank_rejected() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    let (ok, _, stderr) = run_cli("edit blank", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("Invalid profile name"));
+}

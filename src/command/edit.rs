@@ -1,4 +1,4 @@
-use crate::cli::validate_name;
+use crate::cli::{validate_name, ensure_not_reserved};
 use crate::command::prompt::prompt_profile_env;
 use crate::error::CsError;
 use crate::output;
@@ -6,6 +6,7 @@ use crate::store::{read_profile, save_profile, KEY_AUTO_COMPACT_WINDOW};
 
 pub fn run(name: &str) -> Result<(), CsError> {
     validate_name(name)?;
+    ensure_not_reserved(name)?;
 
     let existing = read_profile(name)?;
     let env = existing

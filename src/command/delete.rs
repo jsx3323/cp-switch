@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::cli::validate_name;
+use crate::cli::{validate_name, ensure_not_reserved};
 use crate::error::CsError;
 use crate::input;
 use crate::output;
@@ -9,6 +9,7 @@ use crate::store::{delete_profile, read_current, clear_current,
 
 pub fn run(name: &str, force: bool, project: &Path) -> Result<(), CsError> {
     validate_name(name)?;
+    ensure_not_reserved(name)?;
     let project_current = read_current(project)?;
     let user_current = read_user_current()?;
 

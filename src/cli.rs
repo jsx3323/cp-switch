@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::error::CsError;
+use crate::store::BLANK_PROFILE_NAME;
 
 #[derive(Parser)]
 #[command(name = "cp-switch")]
@@ -75,6 +76,13 @@ pub enum Commands {
 
 pub fn validate_name(name: &str) -> Result<(), CsError> {
     if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        return Err(CsError::InvalidProfileName { name: name.into() });
+    }
+    Ok(())
+}
+
+pub fn ensure_not_reserved(name: &str) -> Result<(), CsError> {
+    if name == BLANK_PROFILE_NAME {
         return Err(CsError::InvalidProfileName { name: name.into() });
     }
     Ok(())
