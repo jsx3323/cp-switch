@@ -280,6 +280,44 @@ fn test_clear_env_removes_all_managed_keys() {
 }
 
 // ============================================================
+// set_model / clear_model 纯函数测试
+// ============================================================
+
+#[test]
+fn test_set_model_adds_top_level_field() {
+    let settings = serde_json::json!({"permissions":{"allow":[]},"env":{"ANTHROPIC_MODEL":"x"}});
+    let new = cp_switch::store::set_model(settings, "claude-fable-5[1m]").unwrap();
+    // 顶层 model 字段被写入，且不影响 env / permissions
+    assert_eq!(new.get("model").unwrap(), "claude-fable-5[1m]");
+    assert_eq!(new.get("env").unwrap().get("ANTHROPIC_MODEL").unwrap(), "x");
+    assert!(new.get("permissions").is_some());
+}
+
+#[test]
+fn test_set_model_overwrites_existing() {
+    let settings = serde_json::json!({"model":"old","env":{}});
+    let new = cp_switch::store::set_model(settings, "claude-opus-4-8").unwrap();
+    assert_eq!(new.get("model").unwrap(), "claude-opus-4-8");
+}
+
+#[test]
+fn test_clear_model_removes_field() {
+    let settings = serde_json::json!({"model":"claude-fable-5","env":{}});
+    let (new, existed) = cp_switch::store::clear_model(settings).unwrap();
+    assert!(existed);
+    assert!(new.get("model").is_none());
+    assert!(new.get("env").is_some());
+}
+
+#[test]
+fn test_clear_model_when_absent() {
+    let settings = serde_json::json!({"env":{}});
+    let (new, existed) = cp_switch::store::clear_model(settings).unwrap();
+    assert!(!existed);
+    assert!(new.get("model").is_none());
+}
+
+// ============================================================
 // delete / current 标记测试
 // ============================================================
 
@@ -1526,4 +1564,88 @@ fn test_cli_edit_updates_profile() {
     assert_eq!(profile.get("ANTHROPIC_BASE_URL").unwrap(), "https://new.com");
     assert_eq!(profile.get("ANTHROPIC_API_KEY").unwrap(), "sk-new");
     assert_eq!(profile.get("ANTHROPIC_MODEL").unwrap(), "new-model");
+}
+
+// ============================================================
+// model 命令测试
+// ============================================================
+
+#[test]
+fn test_cli_model_refused_when_no_active_profile() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    // 从未 use 过，无活跃 profile → 拒绝且不修改文件
+    let (ok, _, stderr) = run_cli("model claude-fable-5", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("仅在当前 profile 为 claude"));
+    assert!(read_settings(dir.path()).get("model").is_none());
+}
+
+#[test]
+fn test_cli_model_refused_on_third_party_profile() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    cp_switch::store::save_profile("proxy", &serde_json::json!({
+        "ANTHROPIC_BASE_URL":"https://proxy","ANTHROPIC_API_KEY":"sk-x"
+    })).unwrap();
+    run_cli("use proxy", dir.path());
+
+    // 活跃 profile 是第三方 → 拒绝
+    let (ok, _, stderr) = run_cli("model claude-fable-5", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("仅在当前 profile 为 claude"));
+    assert!(read_settings(dir.path()).get("model").is_none());
+}
+
+#[test]
+fn test_cli_model_set_and_show_on_claude() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    // 切到官方直连
+    run_cli("use claude", dir.path());
+
+    // 设置 model
+    let (ok, stdout, stderr) = run_cli("model claude-fable-5[1m]", dir.path());
+    assert!(ok, "model set failed: {}", stderr);
+    assert!(combined_output(&stdout, &stderr).contains("claude-fable-5[1m]"));
+
+    // 顶层 model 字段写入，env 不受影响
+    let settings = read_settings(dir.path());
+    assert_eq!(settings.get("model").unwrap(), "claude-fable-5[1m]");
+    assert!(settings.get("env").is_some());
+
+    // 无参展示当前值
+    let (ok, stdout, stderr) = run_cli("model", dir.path());
+    assert!(ok);
+    assert!(combined_output(&stdout, &stderr).contains("claude-fable-5[1m]"));
+}
+
+#[test]
+fn test_cli_model_clear() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    run_cli("use claude", dir.path());
+    run_cli("model claude-opus-4-8", dir.path());
+    assert!(read_settings(dir.path()).get("model").is_some());
+
+    let (ok, stdout, stderr) = run_cli("model --clear", dir.path());
+    assert!(ok, "model clear failed: {}", stderr);
+    assert!(combined_output(&stdout, &stderr).contains("Cleared model"));
+    assert!(read_settings(dir.path()).get("model").is_none());
+}
+
+#[test]
+fn test_cli_model_user() {
+    let _store = setup_store();
+    let home = setup_home();
+    let home_path = home.path().to_path_buf();
+
+    // 用户级切到官方直连
+    run_cli_user("use --user claude", "", &home_path);
+
+    let (ok, _, stderr) = run_cli_user("model --user claude-sonnet-5", "", &home_path);
+    assert!(ok, "model --user failed: {}", stderr);
+
+    let settings = read_user_settings(&home_path);
+    assert_eq!(settings.get("model").unwrap(), "claude-sonnet-5");
 }
