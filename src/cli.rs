@@ -72,6 +72,18 @@ pub enum Commands {
         /// 配置名称
         name: String,
     },
+
+    /// 设置/查看本地使用的 Claude 模型（仅在当前 profile 为 claude 时可用）
+    Model {
+        /// 模型 id（如 claude-fable-5[1m]）；省略则显示当前值
+        value: Option<String>,
+        /// 清除 model 字段，回退到 Claude Code 默认
+        #[arg(long, conflicts_with = "value")]
+        clear: bool,
+        /// 操作用户级 settings.json（~/.claude/settings.json）
+        #[arg(long, short)]
+        user: bool,
+    },
 }
 
 pub fn validate_name(name: &str) -> Result<(), CsError> {
