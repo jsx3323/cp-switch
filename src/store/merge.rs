@@ -1,6 +1,6 @@
 use serde_json::Value;
 use crate::error::CsError;
-use super::keys::is_claude_env_key;
+use super::keys::{is_claude_env_key, MODEL_FIELD};
 
 pub fn merge_env(mut settings: Value, env_values: &Value) -> Result<(Value, Vec<String>, Vec<String>), CsError> {
     let profile_env = env_values.as_object()
@@ -56,4 +56,20 @@ pub fn clear_env(mut settings: Value) -> Result<(Value, Vec<String>), CsError> {
     });
 
     Ok((settings, removed))
+}
+
+/// 设置 settings 顶层 model 字段（纯函数，不读写文件）。
+pub fn set_model(mut settings: Value, model: &str) -> Result<Value, CsError> {
+    let obj = settings.as_object_mut()
+        .ok_or(CsError::MalformedJson { detail: "settings must be a JSON object".into() })?;
+    obj.insert(MODEL_FIELD.to_string(), Value::String(model.to_string()));
+    Ok(settings)
+}
+
+/// 移除 settings 顶层 model 字段，返回 (新的 settings, 是否原本存在)。
+pub fn clear_model(mut settings: Value) -> Result<(Value, bool), CsError> {
+    let obj = settings.as_object_mut()
+        .ok_or(CsError::MalformedJson { detail: "settings must be a JSON object".into() })?;
+    let existed = obj.remove(MODEL_FIELD).is_some();
+    Ok((settings, existed))
 }

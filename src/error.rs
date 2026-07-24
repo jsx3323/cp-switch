@@ -40,6 +40,12 @@ pub enum CsError {
 
     #[error("当前目录没有 .claude 目录")]
     NoClaudeDir,
+
+    #[error("model 命令仅在当前 profile 为 claude（官方直连）时可用")]
+    ModelRequiresClaude,
+
+    #[error("Invalid model value (must not be empty)")]
+    InvalidModel,
 }
 
 impl CsError {
@@ -54,6 +60,8 @@ impl CsError {
             CsError::MalformedJson { .. } => 8,
             CsError::Serialization { .. } => 9,
             CsError::NoClaudeDir => 10,
+            CsError::ModelRequiresClaude => 11,
+            CsError::InvalidModel => 12,
         }
     }
 
@@ -67,6 +75,9 @@ impl CsError {
             }
             CsError::NoClaudeDir => {
                 Some("需要新建 .claude/settings.local.json 才能使用此命令".into())
+            }
+            CsError::ModelRequiresClaude => {
+                Some("先运行 'cp-switch use claude' 切换到官方直连，再设置 model".into())
             }
             _ => None,
         }

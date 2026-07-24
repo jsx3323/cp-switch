@@ -12,6 +12,9 @@ pub const KEY_AUTO_COMPACT_WINDOW: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
 pub const CLAUDE_PROFILE_NAME: &str = "claude";
 
+/// settings.local.json 顶层字段：Claude Code 原生模型选择器（区别于 env 里的 ANTHROPIC_MODEL）
+pub const MODEL_FIELD: &str = "model";
+
 /// 精确白名单：仅这 11 个 key 被 cp-switch 管理
 const MANAGED_KEYS: &[&str] = &[
     KEY_BASE_URL,
