@@ -73,6 +73,12 @@ fn combined_output(stdout: &str, stderr: &str) -> String {
     stdout.to_string() + stderr
 }
 
+// 子进程经 env::current_dir() 规范化了项目路径（macOS 上 /var → /private/var），
+// 进程内读取子进程写入的 current marker 时须用同样规范化的路径，否则 key 不匹配。
+fn read_current_canonical(project: &std::path::Path) -> Option<String> {
+    cp_switch::store::read_current(&project.canonicalize().unwrap()).unwrap()
+}
+
 // ── 用户模式测试辅助 ──
 
 fn setup_home() -> TempDir {
@@ -763,14 +769,14 @@ fn test_cli_delete_active_clears_current_marker() {
     run_cli("use active-del", dir.path());
 
     // 确认 current marker 存在
-    assert_eq!(cp_switch::store::read_current(dir.path()).unwrap(), Some("active-del".to_string()));
+    assert_eq!(read_current_canonical(dir.path()), Some("active-del".to_string()));
 
     // --force 删除活跃 profile
     let (ok, _, stderr) = run_cli("delete active-del --force", dir.path());
     assert!(ok, "delete failed: {}", stderr);
 
     // current marker 应被清除
-    assert!(cp_switch::store::read_current(dir.path()).unwrap().is_none());
+    assert!(read_current_canonical(dir.path()).is_none());
 }
 
 #[test]
@@ -1310,7 +1316,7 @@ fn test_cli_delete_dual_active_clears_both() {
     run_cli_user("use --user dual", "", &home_path);
 
     // 两个 current 标记都应存在
-    assert_eq!(cp_switch::store::read_current(project_dir.path()).unwrap(), Some("dual".to_string()));
+    assert_eq!(read_current_canonical(project_dir.path()), Some("dual".to_string()));
     assert_eq!(cp_switch::store::read_user_current().unwrap(), Some("dual".to_string()));
 
     // --force 删除
@@ -1320,7 +1326,7 @@ fn test_cli_delete_dual_active_clears_both() {
     assert!(out.contains("both project and user"));
 
     // 两个 current 标记都应被清除
-    assert!(cp_switch::store::read_current(project_dir.path()).unwrap().is_none());
+    assert!(read_current_canonical(project_dir.path()).is_none());
     assert!(cp_switch::store::read_user_current().unwrap().is_none());
 }
 
@@ -1413,7 +1419,7 @@ fn test_cli_use_claude_clears_env() {
     assert!(settings.get("permissions").is_some());
 
     // current 标记为 claude
-    assert_eq!(cp_switch::store::read_current(dir.path()).unwrap(), Some("claude".to_string()));
+    assert_eq!(read_current_canonical(dir.path()), Some("claude".to_string()));
 }
 
 #[test]
@@ -1495,7 +1501,7 @@ fn test_cli_use_claude_on_clean_project() {
     assert_eq!(env_obj.len(), 0);
 
     // current 标记为 claude
-    assert_eq!(cp_switch::store::read_current(dir.path()).unwrap(), Some("claude".to_string()));
+    assert_eq!(read_current_canonical(dir.path()), Some("claude".to_string()));
 }
 
 #[test]
