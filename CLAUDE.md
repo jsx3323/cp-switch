@@ -9,15 +9,15 @@ src/
   cli.rs          — clap 命令定义 + validate_name
   main.rs         — 命令分发（find_project_dir 集中调用）+ 错误处理
   lib.rs          — 模块导出
-  error.rs        — CsError 枚举（8 变体）+ io_err/json_err/serialization_err
+  error.rs        — CsError 枚举 + io_err/json_err/serialization_err
   input.rs        — 交互式输入（prompt_required/prompt_with_default/prompt_optional→Option/prompt_confirm）
   output.rs       — 终端彩色输出（含 diff 渲染和 ListStatus 枚举）
   store/
     mod.rs        — 显式 re-export（不含 validate_name）
-    keys.rs       — KEY_* 常量（11 个）+ is_claude_env_key + derive_default_models + CONFLICT_GROUPS
+    keys.rs       — KEY_* 常量（11 个 env key）+ MODEL_FIELD（顶层 model 字段）+ is_claude_env_key + derive_default_models
     path.rs       — 路径构造 + find_project_dir + simple_hash（pub(crate）内部函数）
     io.rs         — 文件 CRUD（profile/current/settings 读写）+ read_current_env（settings 不存在时返回默认空值）+ 原子写入（write→tmp→rename）+ settings 备份
-    merge.rs      — merge_env 纯函数（不读写文件）
+    merge.rs      — merge_env/clear_env + set_model/clear_model 纯函数（不读写文件）
   command/
     prompt.rs     — 共享 prompt_profile_env（add/edit 共用字段提示）
     add.rs        — 交互式创建 profile
@@ -27,6 +27,7 @@ src/
     delete.rs     — 删除 profile（活跃时需确认）
     diff.rs       — 当前 env 与 profile 的文本 diff（含 .claude 目录检查）
     edit.rs       — 编辑已有 profile（保留非标准 key）
+    model.rs      — 设置/查看顶层 model 字段（门控：仅当前 profile 为 claude 时可用）
 tests/
   integration.rs  — 单元/纯函数测试 + CLI 子进程测试 + 错误路径 + 端到端行为测试
 ```
@@ -58,6 +59,12 @@ tests/
 ## use 行为
 
 先清除 `env` 中所有 `ANTHROPIC_*` key，再写入 profile 的 key。非 ANTHROPIC_* env 和 permissions 不受影响。项目无 `settings.local.json` 时自动创建。
+
+## model 行为
+
+`cp-switch model [value] [--clear] [--user]` 操作 settings 顶层 `model` 字段（CC 原生模型选择器，区别于 `env.ANTHROPIC_MODEL`）。
+
+门控：仅当前 profile 为内置 `claude`（官方直连）时可用——无活跃 profile 或第三方 profile 时报错 `ModelRequiresClaude` 并不改文件。理由：顶层 model 只对官方 API 有意义。无参显示当前值，`--clear` 删除该字段。与 profile 系统正交（`use` 不动 model，`model` 不动 env），value 只校验非空，具体 id 交给 CC。
 
 ## 测试
 
