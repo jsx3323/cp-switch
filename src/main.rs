@@ -59,5 +59,13 @@ fn run(cli: Cli) -> Result<(), CsError> {
             }
         }
         Commands::Edit { name } => command::edit::run(&name),
+        Commands::Model { value, clear, user } => {
+            if user {
+                command::model::run_user(value, clear)
+            } else {
+                let project = store::find_project_dir()?;
+                command::model::run(value, clear, &project)
+            }
+        }
     }
 }
