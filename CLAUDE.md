@@ -15,11 +15,12 @@ src/
   store/
     mod.rs        — 显式 re-export（不含 validate_name）
     keys.rs       — KEY_* 常量（11 个 env key）+ MODEL_FIELD（顶层 model 字段）+ is_claude_env_key + derive_default_models
-    path.rs       — 路径构造 + find_project_dir + simple_hash（pub(crate）内部函数）
-    io.rs         — 文件 CRUD（profile/current/settings 读写）+ read_current_env（settings 不存在时返回默认空值）+ 原子写入（write→tmp→rename）+ settings 备份
+    state.rs      — State 结构（profiles / project_currents / user_current，单文件 state.json 的内存表示）
+    path.rs       — 路径构造（state_path/settings_local_path/user_settings_path）+ find_project_dir
+    io.rs         — state.json CRUD（profile/current 读写走 read_state/write_state）+ 旧文件夹格式自动迁移（try_migrate）+ settings 读写 + read_current_env（settings 不存在时返回默认空值）+ 原子写入（write→tmp→rename）+ settings 备份
     merge.rs      — merge_env/clear_env + set_model/clear_model 纯函数（不读写文件）
   command/
-    prompt.rs     — 共享 prompt_profile_env（add/edit 共用字段提示）
+    prompt.rs     — 共享 prompt_profile_env（add/edit 共用字段提示；鉴权字段收集 ANTHROPIC_AUTH_TOKEN）
     add.rs        — 交互式创建 profile
     use_profile.rs — 切换配置（IO 编排：read→merge→write，含 .claude 目录检查）
     list.rs       — 列出 profiles + 活跃标记（ListStatus::Active/Outdated/Missing/Inactive）
@@ -34,7 +35,7 @@ tests/
 
 ## 编码约定
 
-- 环境变量 key 用 `KEY_*` 常量（store/keys.rs 中 7 个），不硬编码字符串
+- 环境变量 key 用 `KEY_*` 常量（store/keys.rs 中 11 个），不硬编码字符串
 - 文件操作 TOCTOU-free：直接操作 + `match` NotFound，不先 `exists()` 再操作
 - 写入操作原子性：先写临时文件 → `fs::rename`，防止半写损坏
 - `write_settings_local` 备份已有文件到 `.claude/settings.local.json.bak`，不自动清理
@@ -50,9 +51,12 @@ tests/
 
 ## 存储
 
-- Profile: `~/.cp-switch/profiles/<name>.json`（仅含 ANTHROPIC_* env vars）
-- Current marker: `~/.cp-switch/projects/<fnv1a-hash>/current`
-- Settings: 项目 `.claude/settings.local.json` 的 `env` 字段
+- 单文件 `~/.cp-switch/state.json`，结构见 store/state.rs：
+  - `profiles`: `{ <name>: { env kv } }`（仅含受管 env vars）
+  - `project_currents`: `{ <项目绝对路径>: <profile 名> }`（用完整路径作 key，无 hash）
+  - `user_current`: `Option<String>`（`--user` 级活跃 profile）
+- 旧的文件夹格式（`profiles/<name>.json` + `projects/<hash>/current` + `current`）在首次读取 state.json 缺失时由 `try_migrate` 自动迁入并清理
+- Settings: 项目 `.claude/settings.local.json` 的 `env` 字段；用户级为 `~/.claude/settings.json`
 - `CP_SWITCH_DIR` 环境变量可覆盖根目录
 - 跨平台 home 目录通过 `dirs` crate
 
