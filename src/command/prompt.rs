@@ -5,7 +5,7 @@ use crate::input;
 use crate::output;
 use crate::store::{
     derive_default_models,
-    KEY_API_KEY, KEY_AUTO_COMPACT_WINDOW, KEY_BASE_URL, KEY_EFFORT_LEVEL,
+    KEY_AUTH_TOKEN, KEY_AUTO_COMPACT_WINDOW, KEY_BASE_URL, KEY_EFFORT_LEVEL,
     KEY_MODEL, KEY_SMALL_FAST_MODEL, KEY_SUBAGENT_MODEL,
 };
 
@@ -29,10 +29,10 @@ pub fn prompt_profile_env(
     } else {
         input::prompt_required(KEY_BASE_URL)?
     };
-    let api_key = if existing.is_some() {
-        input::prompt_with_default(KEY_API_KEY, get_str(KEY_API_KEY).unwrap_or(""))?
+    let auth_token = if existing.is_some() {
+        input::prompt_with_default(KEY_AUTH_TOKEN, get_str(KEY_AUTH_TOKEN).unwrap_or(""))?
     } else {
-        input::prompt_required(KEY_API_KEY)?
+        input::prompt_required(KEY_AUTH_TOKEN)?
     };
     let model = if existing.is_some() {
         input::prompt_with_default(KEY_MODEL, get_str(KEY_MODEL).unwrap_or(""))?
@@ -42,7 +42,7 @@ pub fn prompt_profile_env(
 
     let mut env = Map::new();
     env.insert(KEY_BASE_URL.into(), Value::String(base_url));
-    env.insert(KEY_API_KEY.into(), Value::String(api_key));
+    env.insert(KEY_AUTH_TOKEN.into(), Value::String(auth_token));
     env.insert(KEY_MODEL.into(), Value::String(model.clone()));
 
     // --- 4 个推导模型 key（SMALL_FAST / HAIKU / SONNET / OPUS）---

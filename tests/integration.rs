@@ -398,7 +398,7 @@ fn test_cli_add_interactive_auto_derive() {
     let profile = cp_switch::store::read_profile("test-add").unwrap();
     let obj = profile.as_object().unwrap();
     assert_eq!(obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://api.anthropic.com");
-    assert_eq!(obj.get("ANTHROPIC_API_KEY").unwrap(), "sk-ant-test");
+    assert_eq!(obj.get("ANTHROPIC_AUTH_TOKEN").unwrap(), "sk-ant-test");
     assert_eq!(obj.get("ANTHROPIC_MODEL").unwrap(), "claude-sonnet-4-6");
     assert_eq!(obj.get("ANTHROPIC_SMALL_FAST_MODEL").unwrap(), "claude-sonnet-4-6"); // auto-derived
 }
@@ -1108,7 +1108,7 @@ fn test_cli_use_user_creates_settings_and_current() {
     let settings = read_user_settings(&home_path);
     let env_obj = get_env_obj(&settings);
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://api.test.com");
-    assert_eq!(env_obj.get("ANTHROPIC_API_KEY").unwrap(), "sk-test");
+    assert_eq!(env_obj.get("ANTHROPIC_AUTH_TOKEN").unwrap(), "sk-test");
     assert_eq!(env_obj.get("ANTHROPIC_MODEL").unwrap(), "claude-sonnet-4");
 
     // 验证用户级 current 标记
@@ -1556,7 +1556,7 @@ fn test_cli_edit_updates_profile() {
     // verify initial values
     let profile = cp_switch::store::read_profile("edit-me").unwrap();
     assert_eq!(profile.get("ANTHROPIC_BASE_URL").unwrap(), "https://old.com");
-    assert_eq!(profile.get("ANTHROPIC_API_KEY").unwrap(), "sk-old");
+    assert_eq!(profile.get("ANTHROPIC_AUTH_TOKEN").unwrap(), "sk-old");
 
     // 编辑为新的值
     let edit_input = "https://new.com\nsk-new\nnew-model\n\n\n\n\n";
@@ -1568,7 +1568,7 @@ fn test_cli_edit_updates_profile() {
     // 验证值已更新
     let profile = cp_switch::store::read_profile("edit-me").unwrap();
     assert_eq!(profile.get("ANTHROPIC_BASE_URL").unwrap(), "https://new.com");
-    assert_eq!(profile.get("ANTHROPIC_API_KEY").unwrap(), "sk-new");
+    assert_eq!(profile.get("ANTHROPIC_AUTH_TOKEN").unwrap(), "sk-new");
     assert_eq!(profile.get("ANTHROPIC_MODEL").unwrap(), "new-model");
 }
 
