@@ -2,7 +2,7 @@ use crate::cli::{validate_name, ensure_not_reserved};
 use crate::command::prompt::prompt_profile_env;
 use crate::error::CsError;
 use crate::output;
-use crate::store::{read_profile, save_profile, KEY_AUTO_COMPACT_WINDOW};
+use crate::store::{is_claude_env_key, read_profile, save_profile};
 
 pub fn run(name: &str) -> Result<(), CsError> {
     validate_name(name)?;
@@ -15,9 +15,11 @@ pub fn run(name: &str) -> Result<(), CsError> {
 
     let mut new_env = prompt_profile_env(Some(env))?;
 
-    // 保留非标准 key（AUTO_COMPACT_WINDOW 已在 prompt_profile_env 中处理，不恢复）
+    // 保留非标准 key（用户手动加的 non-managed key）。
+    // managed key 一律不恢复：prompt 已重新收集当前应有的 managed key，
+    // 恢复反而会残留 prompt 不再输出的旧 key（如从 API_KEY 迁移到 AUTH_TOKEN 时的旧 API_KEY）。
     for (key, value) in env.iter() {
-        if key == KEY_AUTO_COMPACT_WINDOW {
+        if is_claude_env_key(key) {
             continue;
         }
         if !new_env.contains_key(key) {

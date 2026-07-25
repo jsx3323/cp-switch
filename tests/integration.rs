@@ -1572,6 +1572,30 @@ fn test_cli_edit_updates_profile() {
     assert_eq!(profile.get("ANTHROPIC_MODEL").unwrap(), "new-model");
 }
 
+#[test]
+fn test_cli_edit_migrates_api_key_to_auth_token() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 旧 profile：只有 API_KEY + 一个用户自定义 non-managed key
+    cp_switch::store::save_profile("legacy", &serde_json::json!({
+        "ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old",
+        "MY_CUSTOM":"keep"
+    })).unwrap();
+
+    // edit：base_url 留空沿用旧值，token 填新值
+    let edit_input = "\ntok-new\n\n\n\n\n\n";
+    let (ok, _, stderr) = run_cli_stdin("edit legacy", edit_input, dir.path());
+    assert!(ok, "edit failed: {}", stderr);
+
+    let profile = cp_switch::store::read_profile("legacy").unwrap();
+    // 迁移到 AUTH_TOKEN，旧 API_KEY 被丢弃
+    assert_eq!(profile.get("ANTHROPIC_AUTH_TOKEN").unwrap(), "tok-new");
+    assert!(profile.get("ANTHROPIC_API_KEY").is_none());
+    // 非 managed key 仍保留
+    assert_eq!(profile.get("MY_CUSTOM").unwrap(), "keep");
+}
+
 // ============================================================
 // model 命令测试
 // ============================================================
