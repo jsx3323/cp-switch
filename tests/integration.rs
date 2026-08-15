@@ -825,11 +825,11 @@ fn test_cli_list_shows_outdated_when_profile_updated() {
     })).unwrap();
 
     // list 应显示 (active - outdated)
-    let (ok, stdout, stderr) = run_cli("list", dir.path());
+    let (ok, stdout, _stderr) = run_cli("list", dir.path());
     assert!(ok);
-    let out = combined_output(&stdout, &stderr);
-    assert!(out.contains("outdated"));
-    assert!(!out.contains("(active)") || out.contains("(active - outdated)"));
+    assert!(stdout.contains("myenv"));
+    assert_eq!(stdout.matches("(active - outdated)").count(), 1);
+    assert_eq!(stdout.matches("(active)").count(), 0);
 
     // 再次 use 后恢复正常
     run_cli("use myenv", dir.path());
@@ -1185,11 +1185,10 @@ fn test_cli_list_user_shows_active() {
     run_cli_user("use --user alpha", "", &home_path);
 
     // list --user 应显示 alpha 为 active
-    let (ok, stdout, stderr) = run_cli_user("list --user", "", &home_path);
+    let (ok, stdout, _stderr) = run_cli_user("list --user", "", &home_path);
     assert!(ok);
-    let out = combined_output(&stdout, &stderr);
     // 只有 alpha 标 active，beta 不标
-    assert!(out.contains("alpha") && out.contains("beta"));
+    assert!(stdout.contains("alpha") && stdout.contains("beta"));
     assert_eq!(stdout.matches("(active)").count(), 1);
 }
 
@@ -1213,9 +1212,9 @@ fn test_cli_diff_user() {
 
     let (ok, stdout, stderr) = run_cli_user("diff --user diff-me", "", &home_path);
     assert!(ok, "diff failed: {}", stderr);
-    let out = combined_output(&stdout, &stderr);
-    assert!(out.contains("user settings") || out.contains("profile:"));
-    assert!(out.contains("-") && out.contains("+"));
+    assert!(stdout.contains("--- user settings"));
+    assert!(stdout.contains("+++ profile: diff-me"));
+    assert!(stdout.contains("https://updated"));
 }
 
 #[test]
