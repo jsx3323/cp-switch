@@ -81,12 +81,16 @@ pub fn managed_env(settings: &Value) -> Result<Value, CsError> {
     ))
 }
 
-/// profile 的每个 key 在当前 env 中是否都有相同的值（`merge_env` 的逆向检查）
-pub fn is_env_applied(current_env: &Value, profile_env: &Value) -> bool {
+/// profile 的每个 key 在 settings 的 env 中是否都有相同的值（`merge_env` 的逆向检查）。
+///
+/// 比的是未过滤的 `env`，不是 `managed_env`：`merge_env` 写入 profile 的**全部** key，
+/// 而 edit 会保留非标准 key，拿过滤后的 env 来比会让这种 profile 永远显示 outdated。
+pub fn is_env_applied(settings: &Value, profile_env: &Value) -> bool {
     let empty = Map::new();
-    let current_obj = current_env.as_object().unwrap_or(&empty);
+    let env_obj =
+        settings.get(ENV_FIELD).and_then(Value::as_object).unwrap_or(&empty);
     let profile_obj = profile_env.as_object().unwrap_or(&empty);
-    profile_obj.iter().all(|(k, v)| current_obj.get(k) == Some(v))
+    profile_obj.iter().all(|(k, v)| env_obj.get(k) == Some(v))
 }
 
 /// 读取 settings 顶层 model 字段

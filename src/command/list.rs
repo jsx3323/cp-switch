@@ -16,15 +16,15 @@ pub fn run(scope: &Scope) -> Result<(), CsError> {
     }
 
     // 至多一个 profile 处于活跃状态，settings 只需读一次，不放进循环
-    let current_env = match &listing.active_env {
-        Some(_) => Some(scope.read_current_env()?),
+    let settings = match &listing.active_env {
+        Some(_) => Some(scope.read_settings()?),
         None => None,
     };
 
     for name in &listing.profiles {
-        let status = match (listing.current.as_ref() == Some(name), &current_env, &listing.active_env) {
+        let status = match (listing.current.as_ref() == Some(name), &settings, &listing.active_env) {
             (false, _, _) => ListStatus::Inactive,
-            (true, Some(current), Some(profile)) if is_env_applied(current, profile) => ListStatus::Active,
+            (true, Some(settings), Some(profile)) if is_env_applied(settings, profile) => ListStatus::Active,
             (true, ..) => ListStatus::Outdated,
         };
         output::list_item(name, &status);

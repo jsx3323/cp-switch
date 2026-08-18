@@ -677,6 +677,25 @@ fn test_cli_diff_shows_additions_and_deletions() {
 }
 
 #[test]
+fn test_cli_list_active_with_non_standard_key() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    // edit 会保留非标准 key，use 也照写；list 不该因此把它判成 outdated
+    cp_switch::store::save_profile("legacy", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://legacy", "WEIRD": "w"
+    })).unwrap();
+
+    let (ok, _, stderr) = run_cli("use legacy", dir.path());
+    assert!(ok, "use failed: {}", stderr);
+
+    let (ok, stdout, stderr) = run_cli("list", dir.path());
+    assert!(ok, "list failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("(active)"), "应为 active: {}", out);
+    assert!(!out.contains("outdated"), "不应为 outdated: {}", out);
+}
+
+#[test]
 fn test_cli_diff_no_blank_lines_between_changes() {
     let _store = setup_store();
     let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://old"}}"#);
