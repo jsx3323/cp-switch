@@ -89,11 +89,9 @@ fn try_migrate() -> Result<State, CsError> {
 
 // ── profiles ──
 
-/// 排序后的 profile 名单，用于列表展示与「可用值」提示
+/// 排序后的 profile 名单，用于列表展示与「可用值」提示（BTreeMap 的迭代序即字典序）
 pub(crate) fn sorted_names(state: State) -> Vec<String> {
-    let mut names: Vec<String> = state.profiles.into_keys().collect();
-    names.sort();
-    names
+    state.profiles.into_keys().collect()
 }
 
 pub fn list_profiles() -> Result<Vec<String>, CsError> {

@@ -1137,6 +1137,34 @@ fn test_state_migration_from_old_format() {
 }
 
 #[test]
+fn test_state_json_keys_sorted_and_byte_stable() {
+    let _store = setup_store();
+    let state_path = std::path::Path::new(&store_dir_val()).join("state.json");
+
+    // 故意按非字典序创建
+    for name in ["zebra", "alpha", "middle"] {
+        cp_switch::store::save_profile(name, &serde_json::json!({"ANTHROPIC_MODEL": name})).unwrap();
+    }
+
+    // 落盘文本里 key 即字典序（HashMap 的迭代序每进程随机，会让顺序每次写盘都变）
+    let text = fs::read_to_string(&state_path).unwrap();
+    let pos = |k: &str| text.find(&format!("\"{}\"", k)).unwrap();
+    assert!(pos("alpha") < pos("middle"), "{}", text);
+    assert!(pos("middle") < pos("zebra"), "{}", text);
+
+    // 内容不变的重复写盘应产出完全相同的字节
+    cp_switch::store::save_profile("middle", &serde_json::json!({"ANTHROPIC_MODEL": "middle"})).unwrap();
+    assert_eq!(fs::read_to_string(&state_path).unwrap(), text);
+
+    // project_currents 同样有序
+    for p in ["/tmp/zzz", "/tmp/aaa"] {
+        cp_switch::store::write_current(std::path::Path::new(p), "alpha").unwrap();
+    }
+    let text = fs::read_to_string(&state_path).unwrap();
+    assert!(text.find("/tmp/aaa").unwrap() < text.find("/tmp/zzz").unwrap(), "{}", text);
+}
+
+#[test]
 fn test_state_json_corrupted() {
     let _store = setup_store();
     let store_path = store_dir_val();
