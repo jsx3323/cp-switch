@@ -90,8 +90,10 @@ rename 摘掉源 profile，并把 `project_currents` 中全部指向旧名的条
 settings 只存 env 值、不存 profile 名，所以 rename 不碰 settings 文件，也不需要 `ensure_claude_dir`
 或 `--user`——改完 `is_env_applied` 仍成立，`list` 显示 `active`。
 
-目标名已存在时默认 `ProfileExists`，`--force` 覆盖。实现里先 `get(src).cloned()` 再 remove/insert，
-`src == dst` 且带 `--force` 时才不会把数据摘空。
+目标名已存在时默认 `ProfileExists`，`--force` 覆盖；覆盖不可恢复（`state.json` 不像 settings 那样留 `.bak`）。
+源与目标同名在 cli 层就报 `SameProfileName`（与非法名同退出码 5）：走到 store 里只会得到
+「已存在，用 --force 覆盖」这种误导提示，或带 `--force` 时一句名不副实的「已改名」。
+即便如此 `transfer_profile` 仍先 `get(src).cloned()` 再 remove/insert，不依赖上层校验保证同名安全。
 
 ## model 行为
 
