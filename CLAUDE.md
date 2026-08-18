@@ -77,3 +77,11 @@ cargo test -- --test-threads=1
 ```
 
 `--test-threads=1` 必须因为 `std::env::set_var` 需要单线程。测试通过 `CP_SWITCH_DIR` + tempfile 隔离，不操作真实环境。
+
+## 分支与提交
+
+分支模型是 **GitHub Flow**，合并统一用 squash。文档订正一类的小改动可以直接提交到 main。
+
+- **分支名**：`<类型>/<英文短描述>`，小写连字符，如 `feat/model-command`
+- **提交信息**：`<类型>: <中文描述>`，类型取 `feat` / `fix` / `refactor` / `docs` / `chore` / `test`
+- **不带范围**：本仓库既有历史一律无 `(<范围>)`，沿用即可，别单独引入
