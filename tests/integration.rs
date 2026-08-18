@@ -206,7 +206,7 @@ fn test_list_profiles() {
 fn test_merge_clears_old_keys_and_writes_new() {
     let settings = serde_json::json!({"permissions":{"allow":["Bash(ls)"]},"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old-model","ANTHROPIC_SMALL_FAST_MODEL":"old-model","API_TIMEOUT_MS":"3000","OTHER":"keep"}});
     let new_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_API_KEY":"sk-new","ANTHROPIC_MODEL":"new-model","ANTHROPIC_DEFAULT_HAIKU_MODEL":"haiku"});
-    let (merged, _changed, _removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
+    let (merged, _removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://new");
     assert_eq!(env_obj.get("ANTHROPIC_API_KEY").unwrap(), "sk-new");
@@ -225,7 +225,7 @@ fn test_merge_removed_excludes_overwritten_keys() {
         "ANTHROPIC_SMALL_FAST_MODEL":"old",
         "OTHER":"keep"}});
     let new_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_API_KEY":"sk-new","ANTHROPIC_DEFAULT_HAIKU_MODEL":"haiku"});
-    let (_merged, _written, mut removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
+    let (_merged, mut removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
     removed.sort();
     assert_eq!(removed, vec!["ANTHROPIC_SMALL_FAST_MODEL".to_string()]);
 }
@@ -236,8 +236,8 @@ fn test_merge_switch_back_and_forth() {
     let b_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://b","ANTHROPIC_API_KEY":"sk-b","ANTHROPIC_MODEL":"b"});
     let settings = serde_json::json!({"env":{"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_API_KEY":"sk-a","ANTHROPIC_MODEL":"a"}});
 
-    let (merged, _, _) = cp_switch::store::merge_env(settings, &b_env).unwrap();
-    let (merged, _, _) = cp_switch::store::merge_env(merged, &a_env).unwrap();
+    let (merged, _) = cp_switch::store::merge_env(settings, &b_env).unwrap();
+    let (merged, _) = cp_switch::store::merge_env(merged, &a_env).unwrap();
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://a");
 }
@@ -245,7 +245,7 @@ fn test_merge_switch_back_and_forth() {
 #[test]
 fn test_merge_creates_env_when_missing() {
     let settings = serde_json::json!({"permissions":{"allow":["Bash"]}});
-    let (merged, _, _) = cp_switch::store::merge_env(settings, &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
+    let (merged, _) = cp_switch::store::merge_env(settings, &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
     assert!(merged.get("env").is_some());
     assert!(merged.get("permissions").is_some());
 }
@@ -253,7 +253,7 @@ fn test_merge_creates_env_when_missing() {
 #[test]
 fn test_merge_with_empty_env() {
     let settings = serde_json::json!({"permissions":{"allow":["Bash"]},"env":{}});
-    let (merged, _, _) = cp_switch::store::merge_env(settings, &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
+    let (merged, _) = cp_switch::store::merge_env(settings, &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
     assert_eq!(env_obj.len(), 1);
 }

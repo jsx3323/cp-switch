@@ -1,7 +1,6 @@
 use serde_json::{Map, Value};
 
 use super::{ensure_claude_dir, scope_label};
-use crate::cli::validate_name;
 use crate::error::CsError;
 use crate::output;
 use crate::store::{Scope, is_builtin, merge_env, read_profile};
@@ -12,13 +11,12 @@ pub fn run(name: &str, scope: &Scope) -> Result<(), CsError> {
     let env_values = if builtin {
         Value::Object(Map::new())
     } else {
-        validate_name(name)?;
-        // 先确认 profile 存在，再去动文件系统或打断用户
+        // 名字合法性已在 CLI 边界校验；先确认 profile 存在，再去动文件系统或打断用户
         read_profile(name)?
     };
 
     ensure_claude_dir(scope)?;
-    let (merged, written, removed) = merge_env(scope.read_settings()?, &env_values)?;
+    let (merged, removed) = merge_env(scope.read_settings()?, &env_values)?;
     scope.write_settings(&merged)?;
     scope.write_current(name)?;
 
@@ -27,8 +25,10 @@ pub fn run(name: &str, scope: &Scope) -> Result<(), CsError> {
     } else {
         output::success(&format!("Switched to profile '{}'{}", name, scope_label(scope)));
     }
-    for key in &written {
-        output::written(key, &env_values[key]);
+    if let Some(written) = env_values.as_object() {
+        for (key, value) in written {
+            output::written(key, value);
+        }
     }
     for key in &removed {
         output::removed(key);

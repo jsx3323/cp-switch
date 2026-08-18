@@ -29,20 +29,18 @@ fn take_managed(env_obj: &mut Map<String, Value>) -> Vec<String> {
     removed
 }
 
-/// 用 profile 的 env 替换 settings 中的受管理 key，返回 (新的 settings, 写入的 key, 真正移除的 key)。
+/// 用 profile 的 env 替换 settings 中的受管理 key，返回 (新的 settings, 真正移除的 key)。
+/// 写入了哪些 key 不在返回值里——那就是 `env_values` 自己的 key，调用方本来就有。
 ///
 /// `env_values` 为空对象时等价于纯清除（`clear_env`）：受管理 key 全部移除，
 /// env 因此变空则连字段一起删掉，不凭空写出 `"env": {}` 污染用户手写的 settings。
-pub fn merge_env(
-    mut settings: Value,
-    env_values: &Value,
-) -> Result<(Value, Vec<String>, Vec<String>), CsError> {
+pub fn merge_env(mut settings: Value, env_values: &Value) -> Result<(Value, Vec<String>), CsError> {
     let profile_env = as_object(env_values, "env_values")?;
 
     let obj = as_object_mut(&mut settings, "settings")?;
     // 纯清除且本就没有 env：保持不存在，只有确实要写入值时才建出该字段
     if profile_env.is_empty() && !obj.contains_key(ENV_FIELD) {
-        return Ok((settings, Vec::new(), Vec::new()));
+        return Ok((settings, Vec::new()));
     }
 
     let env_slot = obj.entry(ENV_FIELD).or_insert_with(|| Value::Object(Map::new()));
@@ -59,14 +57,13 @@ pub fn merge_env(
     // removed 暂含所有被清除的受管理 key；剔除 profile 重新写入的，只保留真正移除的
     removed.retain(|k| !profile_env.contains_key(k));
 
-    Ok((settings, profile_env.keys().cloned().collect(), removed))
+    Ok((settings, removed))
 }
 
 /// 清除 settings env 中所有受管理的 ANTHROPIC_* / CLAUDE_CODE_* key。
 /// 返回 (新的 settings, 被移除的 key 列表)。
 pub fn clear_env(settings: Value) -> Result<(Value, Vec<String>), CsError> {
-    let (settings, _, removed) = merge_env(settings, &Value::Object(Map::new()))?;
-    Ok((settings, removed))
+    merge_env(settings, &Value::Object(Map::new()))
 }
 
 /// 从 settings 中提取受管理的 env key，缺失或空的 env 得到空对象。
