@@ -677,6 +677,22 @@ fn test_cli_diff_shows_additions_and_deletions() {
 }
 
 #[test]
+fn test_cli_diff_no_blank_lines_between_changes() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://old"}}"#);
+    cp_switch::store::save_profile("tight", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://new", "ANTHROPIC_MODEL": "m"
+    })).unwrap();
+
+    let (ok, stdout, stderr) = run_cli("diff tight", dir.path());
+    assert!(ok, "diff failed: {}", stderr);
+    // 每行差异后不应跟一个空行（源行自带的换行须先去掉）
+    let body: Vec<&str> = stdout.lines().collect();
+    assert!(body.len() > 2, "diff 输出过短: {:?}", body);
+    assert!(!body.iter().any(|l| l.is_empty()), "diff 输出含空行: {:?}", body);
+}
+
+#[test]
 fn test_cli_diff_in_bare_project_no_prompt() {
     let _store = setup_store();
     let dir = setup_bare_project();
