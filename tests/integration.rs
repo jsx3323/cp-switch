@@ -1450,6 +1450,20 @@ fn test_cli_use_claude_clears_env() {
 }
 
 #[test]
+fn test_cli_use_claude_reject_create_no_claude_dir() {
+    let _store = setup_store();
+    let dir = tempfile::tempdir().unwrap();
+    assert!(!dir.path().join(".claude").exists());
+
+    // 拒绝后不应建出 .claude，也不应把该目录登记进 project_currents
+    let (ok, _stdout, stderr) = run_cli_stdin("use claude", "n\n", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("当前目录没有 .claude 目录"));
+    assert!(!dir.path().join(".claude").exists());
+    assert_eq!(read_current_canonical(dir.path()), None);
+}
+
+#[test]
 fn test_cli_use_claude_user() {
     let _store = setup_store();
     let home = setup_home();
@@ -1513,7 +1527,7 @@ fn test_cli_use_claude_on_clean_project() {
     let dir = tempfile::tempdir().unwrap();
     assert!(!dir.path().join(".claude").exists());
 
-    // use claude 需要确认创建 .claude
+    // use claude 同样需要确认创建 .claude
     let (ok, stdout, stderr) = run_cli_stdin("use claude", "y\n", dir.path());
     assert!(ok, "use claude on clean project failed: {}", stderr);
     let out = combined_output(&stdout, &stderr);
