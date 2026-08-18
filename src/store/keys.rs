@@ -42,11 +42,11 @@ pub fn is_builtin(name: &str) -> bool {
     name == CLAUDE_PROFILE_NAME
 }
 
-pub fn derive_default_models(model: &str) -> [(String, String); 4] {
+pub fn derive_default_models(model: &str) -> [(&'static str, &str); 4] {
     [
-        (KEY_SMALL_FAST_MODEL.into(), model.into()),
-        (KEY_DEFAULT_HAIKU.into(), model.into()),
-        (KEY_DEFAULT_SONNET.into(), model.into()),
-        (KEY_DEFAULT_OPUS.into(), model.into()),
+        (KEY_SMALL_FAST_MODEL, model),
+        (KEY_DEFAULT_HAIKU, model),
+        (KEY_DEFAULT_SONNET, model),
+        (KEY_DEFAULT_OPUS, model),
     ]
 }
