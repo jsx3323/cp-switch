@@ -1,98 +1,39 @@
-use std::path::Path;
+use serde_json::{Map, Value};
 
-use crate::cli::validate_name;
+use super::{ensure_claude_dir, scope_label};
 use crate::error::CsError;
-use crate::input;
 use crate::output;
-use crate::store::{read_profile, merge_env, clear_env, write_current, read_settings_local, write_settings_local, has_claude_dir,
-                   read_user_settings, write_user_settings, write_user_current, is_builtin, CLAUDE_PROFILE_NAME};
+use crate::store::{Scope, is_builtin, merge_env, read_profile};
 
-pub fn run(name: &str, project: &Path) -> Result<(), CsError> {
-    if is_builtin(name) {
-        return run_claude_project(project);
+pub fn run(name: &str, scope: &Scope) -> Result<(), CsError> {
+    // 内置 claude 是「受管 env 为空」的退化 profile：走同一条 read→merge→write，只清不写
+    let builtin = is_builtin(name);
+    let env_values = if builtin {
+        Value::Object(Map::new())
+    } else {
+        // 名字合法性已在 CLI 边界校验；先确认 profile 存在，再去动文件系统或打断用户
+        read_profile(name)?
+    };
+
+    ensure_claude_dir(scope)?;
+    let (merged, removed) = merge_env(scope.read_settings()?, &env_values)?;
+    scope.write_settings(&merged)?;
+    scope.write_current(name)?;
+
+    if builtin {
+        output::success("Switched to default Claude provider");
+    } else {
+        output::success(&format!("Switched to profile '{}'{}", name, scope_label(scope)));
     }
-    validate_name(name)?;
-    ensure_claude_dir(project)?;
-
-    let env_values = read_profile(name)?;
-    let settings = read_settings_local(project)?;
-    let (merged, changed, removed) = merge_env(settings, &env_values)?;
-    write_settings_local(project, &merged)?;
-    write_current(project, name)?;
-
-    output::success(&format!("Switched to profile '{}'", name));
-    for key in &changed {
-        output::info(&format!("  {} = {}", key, env_values.get(key).unwrap()));
-    }
-    for key in &removed {
-        output::removed(key);
-    }
-    Ok(())
-}
-
-pub fn run_user(name: &str) -> Result<(), CsError> {
-    if is_builtin(name) {
-        return run_claude_user();
-    }
-    validate_name(name)?;
-
-    let env_values = read_profile(name)?;
-    let settings = read_user_settings()?;
-    let (merged, changed, removed) = merge_env(settings, &env_values)?;
-    write_user_settings(&merged)?;
-    write_user_current(name)?;
-
-    output::success(&format!("Switched to profile '{}' (user)", name));
-    for key in &changed {
-        output::info(&format!("  {} = {}", key, env_values.get(key).unwrap()));
+    if let Some(written) = env_values.as_object() {
+        for (key, value) in written {
+            output::written(key, value);
+        }
     }
     for key in &removed {
         output::removed(key);
     }
-    Ok(())
-}
-
-/// 项目无 .claude 目录时先征得同意，避免在非项目目录里凭空建出 settings 文件
-fn ensure_claude_dir(project: &Path) -> Result<(), CsError> {
-    if has_claude_dir(project) {
-        return Ok(());
-    }
-    output::warn("当前目录没有 .claude 目录");
-    if !input::prompt_confirm("是否新建 .claude/settings.local.json？")? {
-        return Err(CsError::NoClaudeDir);
-    }
-    Ok(())
-}
-
-fn run_claude_project(project: &Path) -> Result<(), CsError> {
-    ensure_claude_dir(project)?;
-
-    let settings = read_settings_local(project)?;
-    let (merged, removed) = clear_env(settings)?;
-    write_settings_local(project, &merged)?;
-    write_current(project, CLAUDE_PROFILE_NAME)?;
-
-    output::success("Switched to default Claude provider");
-    for key in &removed {
-        output::removed(key);
-    }
-    if removed.is_empty() {
-        output::info("  (no managed env vars to clear)");
-    }
-    Ok(())
-}
-
-fn run_claude_user() -> Result<(), CsError> {
-    let settings = read_user_settings()?;
-    let (merged, removed) = clear_env(settings)?;
-    write_user_settings(&merged)?;
-    write_user_current(CLAUDE_PROFILE_NAME)?;
-
-    output::success("Switched to default Claude provider");
-    for key in &removed {
-        output::removed(key);
-    }
-    if removed.is_empty() {
+    if builtin && removed.is_empty() {
         output::info("  (no managed env vars to clear)");
     }
     Ok(())

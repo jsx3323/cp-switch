@@ -3,14 +3,10 @@ use cp_switch::cli::{Cli, Commands};
 use cp_switch::command;
 use cp_switch::error::CsError;
 use cp_switch::output;
-use cp_switch::store;
+use cp_switch::store::{Scope, find_project_dir};
 
 fn main() {
-    let cli = Cli::parse();
-
-    let result = run(cli);
-
-    if let Err(e) = result {
+    if let Err(e) = run(Cli::parse()) {
         output::error(&e.to_string());
         if let Some(h) = e.hint() {
             output::hint(&h);
@@ -20,52 +16,18 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<(), CsError> {
+    cli.command.validate()?;
     match cli.command {
-        Commands::List { user } => {
-            if user {
-                command::list::run_user()
-            } else {
-                let project = store::find_project_dir()?;
-                command::list::run(&project)
-            }
-        }
-        Commands::Use { name, user } => {
-            if user {
-                command::use_profile::run_user(&name)
-            } else {
-                let project = store::find_project_dir()?;
-                command::use_profile::run(&name, &project)
-            }
-        }
+        Commands::List { user } => command::list::run(&Scope::from_flag(user)?),
+        Commands::Use { name, user } => command::use_profile::run(&name, &Scope::from_flag(user)?),
         Commands::Add { name, force } => command::add::run(&name, force),
-        Commands::Current { user } => {
-            if user {
-                command::current::run_user()
-            } else {
-                let project = store::find_project_dir()?;
-                command::current::run(&project)
-            }
-        }
-        Commands::Delete { name, force } => {
-            let project = store::find_project_dir()?;
-            command::delete::run(&name, force, &project)
-        }
-        Commands::Diff { name, user } => {
-            if user {
-                command::diff::run_user(&name)
-            } else {
-                let project = store::find_project_dir()?;
-                command::diff::run(&name, &project)
-            }
-        }
+        Commands::Current { user } => command::current::run(&Scope::from_flag(user)?),
+        // delete 同时清理两个层级的活跃标记，因此总要知道项目目录
+        Commands::Delete { name, force } => command::delete::run(&name, force, &find_project_dir()?),
+        Commands::Diff { name, user } => command::diff::run(&name, &Scope::from_flag(user)?),
         Commands::Edit { name } => command::edit::run(&name),
         Commands::Model { value, clear, user } => {
-            if user {
-                command::model::run_user(value, clear)
-            } else {
-                let project = store::find_project_dir()?;
-                command::model::run(value, clear, &project)
-            }
+            command::model::run(value, clear, &Scope::from_flag(user)?)
         }
     }
 }

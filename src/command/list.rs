@@ -1,98 +1,47 @@
-use std::path::Path;
-
 use crate::error::CsError;
 use crate::output::{self, ListStatus};
-use crate::store::{list_profiles, read_current, read_current_env, read_profile,
-                   read_user_current, read_user_current_env, is_builtin};
+use crate::store::{Scope, is_builtin, is_env_applied};
 
-/// 检查 profile 的每个 key 在当前 env 中是否都有相同的值
-fn is_profile_synced(current_env: &serde_json::Value, profile_env: &serde_json::Value) -> bool {
-    let empty = serde_json::Map::new();
-    let current_obj = current_env.as_object().unwrap_or(&empty);
-    let profile_obj = profile_env.as_object().unwrap_or(&empty);
-    profile_obj.iter().all(|(k, v)| current_obj.get(k) == Some(v))
-}
+pub fn run(scope: &Scope) -> Result<(), CsError> {
+    let listing = scope.read_listing()?;
 
-pub fn run(project: &Path) -> Result<(), CsError> {
-    let profiles = list_profiles()?;
-    let current = read_current(project)?;
-
-    if profiles.is_empty() && current.is_none() {
+    if listing.profiles.is_empty() && listing.current.is_none() {
         output::info("No profiles found. Use 'cp-switch add <name>' to create one.");
         return Ok(());
     }
 
-    output::info(&format!("Profiles for {}:", project.display()));
-
-    for name in &profiles {
-        let is_active = current.as_ref() == Some(name);
-        if is_active {
-            let current_env = read_current_env(project)?;
-            let profile_env = read_profile(name)?;
-            if is_profile_synced(&current_env, &profile_env) {
-                output::list_item(name, &ListStatus::Active);
-            } else {
-                output::list_item(name, &ListStatus::Outdated);
-            }
-        } else {
-            output::list_item(name, &ListStatus::Inactive);
-        }
+    match scope.project() {
+        Some(project) => output::info(&format!("Profiles for {}:", project.display())),
+        None => output::info("Profiles (user):"),
     }
 
-    // 内置 profile 处理 + missing 检测
-    if let Some(active) = &current
-        && !profiles.contains(active)
+    // 至多一个 profile 处于活跃状态，settings 只需读一次，不放进循环
+    let settings = match &listing.active_env {
+        Some(_) => Some(scope.read_settings()?),
+        None => None,
+    };
+
+    for name in &listing.profiles {
+        let status = match (listing.current.as_ref() == Some(name), &settings, &listing.active_env) {
+            (false, _, _) => ListStatus::Inactive,
+            (true, Some(settings), Some(profile)) if is_env_applied(settings, profile) => ListStatus::Active,
+            (true, ..) => ListStatus::Outdated,
+        };
+        output::list_item(name, &status);
+    }
+
+    // 活跃的 profile 不在名单里：内置 claude 属正常，其余是被删掉的残留标记
+    if let Some(active) = &listing.current
+        && !listing.profiles.contains(active)
     {
-        if is_builtin(active) {
-            output::list_item(active, &ListStatus::Active);
-        } else {
-            output::list_item(active, &ListStatus::Missing);
-        }
+        let status = if is_builtin(active) { ListStatus::Active } else { ListStatus::Missing };
+        output::list_item(active, &status);
     }
 
-    let active_count = if current.is_some() { 1 } else { 0 };
-    output::info(&format!("{} profiles, {} active", profiles.len(), active_count));
-    Ok(())
-}
-
-pub fn run_user() -> Result<(), CsError> {
-    let profiles = list_profiles()?;
-    let current = read_user_current()?;
-
-    if profiles.is_empty() && current.is_none() {
-        output::info("No profiles found. Use 'cp-switch add <name>' to create one.");
-        return Ok(());
-    }
-
-    output::info("Profiles (user):");
-
-    for name in &profiles {
-        let is_active = current.as_ref() == Some(name);
-        if is_active {
-            let current_env = read_user_current_env()?;
-            let profile_env = read_profile(name)?;
-            if is_profile_synced(&current_env, &profile_env) {
-                output::list_item(name, &ListStatus::Active);
-            } else {
-                output::list_item(name, &ListStatus::Outdated);
-            }
-        } else {
-            output::list_item(name, &ListStatus::Inactive);
-        }
-    }
-
-    // 内置 profile 处理 + missing 检测
-    if let Some(active) = &current
-        && !profiles.contains(active)
-    {
-        if is_builtin(active) {
-            output::list_item(active, &ListStatus::Active);
-        } else {
-            output::list_item(active, &ListStatus::Missing);
-        }
-    }
-
-    let active_count = if current.is_some() { 1 } else { 0 };
-    output::info(&format!("{} profiles, {} active", profiles.len(), active_count));
+    output::info(&format!(
+        "{} profiles, {} active",
+        listing.profiles.len(),
+        usize::from(listing.current.is_some())
+    ));
     Ok(())
 }

@@ -86,6 +86,22 @@ pub enum Commands {
     },
 }
 
+impl Commands {
+    /// 各子命令对 profile 名的要求集中在这张表里：谁校验、谁拒绝保留名。
+    /// 在 main 分派前统一调用，命令模块因此不再自带校验。
+    pub fn validate(&self) -> Result<(), CsError> {
+        match self {
+            // 会写 profile：保留名必须拒绝
+            Commands::Add { name, .. } | Commands::Edit { name } | Commands::Delete { name, .. } => {
+                validate_profile_arg(name)
+            }
+            // 只是引用 profile：内置 claude 是合法目标
+            Commands::Use { name, .. } | Commands::Diff { name, .. } => validate_name(name),
+            Commands::List { .. } | Commands::Current { .. } | Commands::Model { .. } => Ok(()),
+        }
+    }
+}
+
 pub fn validate_name(name: &str) -> Result<(), CsError> {
     if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
         return Err(CsError::InvalidProfileName { name: name.into() });
@@ -95,7 +111,13 @@ pub fn validate_name(name: &str) -> Result<(), CsError> {
 
 pub fn ensure_not_reserved(name: &str) -> Result<(), CsError> {
     if is_builtin(name) {
-        return Err(CsError::InvalidProfileName { name: name.into() });
+        return Err(CsError::ReservedProfileName { name: name.into() });
     }
     Ok(())
+}
+
+/// add / edit / delete 接受的 profile 名：既要合法，也不能占用内置名
+pub fn validate_profile_arg(name: &str) -> Result<(), CsError> {
+    validate_name(name)?;
+    ensure_not_reserved(name)
 }

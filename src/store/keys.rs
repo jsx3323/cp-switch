@@ -12,8 +12,11 @@ pub const KEY_AUTO_COMPACT_WINDOW: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
 pub const CLAUDE_PROFILE_NAME: &str = "claude";
 
-/// settings.local.json 顶层字段：Claude Code 原生模型选择器（区别于 env 里的 ANTHROPIC_MODEL）
+/// settings 顶层字段：Claude Code 原生模型选择器（区别于 env 里的 ANTHROPIC_MODEL）
 pub const MODEL_FIELD: &str = "model";
+
+/// settings 顶层字段：环境变量表，cp-switch 只改写其中的受管 key
+pub const ENV_FIELD: &str = "env";
 
 /// 精确白名单：仅这 11 个 key 被 cp-switch 管理
 const MANAGED_KEYS: &[&str] = &[
@@ -31,7 +34,7 @@ const MANAGED_KEYS: &[&str] = &[
 ];
 
 pub fn is_claude_env_key(key: &str) -> bool {
-    MANAGED_KEYS.iter().any(|managed| *managed == key)
+    MANAGED_KEYS.contains(&key)
 }
 
 /// 判断是否为内置 profile 名称
@@ -39,11 +42,11 @@ pub fn is_builtin(name: &str) -> bool {
     name == CLAUDE_PROFILE_NAME
 }
 
-pub fn derive_default_models(model: &str) -> [(String, String); 4] {
+pub fn derive_default_models(model: &str) -> [(&'static str, &str); 4] {
     [
-        (KEY_SMALL_FAST_MODEL.into(), model.into()),
-        (KEY_DEFAULT_HAIKU.into(), model.into()),
-        (KEY_DEFAULT_SONNET.into(), model.into()),
-        (KEY_DEFAULT_OPUS.into(), model.into()),
+        (KEY_SMALL_FAST_MODEL, model),
+        (KEY_DEFAULT_HAIKU, model),
+        (KEY_DEFAULT_SONNET, model),
+        (KEY_DEFAULT_OPUS, model),
     ]
 }

@@ -13,58 +13,88 @@ fn store_dir_val() -> String {
     std::env::var("CP_SWITCH_DIR").unwrap_or_default()
 }
 
-fn setup_project(settings_json: &str) -> TempDir {
+/// 连 .claude 目录都不存在的裸项目
+fn setup_bare_project() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
-    let claude_dir = dir.path().join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(claude_dir.join("settings.local.json"), settings_json).unwrap();
+    assert!(!dir.path().join(".claude").exists());
     dir
 }
 
+fn setup_project(settings_json: &str) -> TempDir {
+    let dir = setup_project_no_settings();
+    fs::write(dir.path().join(".claude/settings.local.json"), settings_json).unwrap();
+    dir
+}
+
+fn read_json(path: impl AsRef<std::path::Path>) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
 fn read_settings(project: &std::path::Path) -> serde_json::Value {
-    let path = project.join(".claude/settings.local.json");
-    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap()
+    read_json(project.join(".claude/settings.local.json"))
 }
 
 fn get_env_obj(settings: &serde_json::Value) -> &serde_json::Map<String, serde_json::Value> {
     settings.get("env").unwrap().as_object().unwrap()
 }
 
-fn run_cli(args: &str, project: &std::path::Path) -> (bool, String, String) {
+/// 唯一的子进程入口：cwd 用于项目级命令，home 用于 --user 命令
+fn spawn_cli(
+    args: &str,
+    input: &str,
+    cwd: Option<&std::path::Path>,
+    home: Option<&std::path::Path>,
+) -> (bool, String, String) {
     let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
-    let output = Command::new(&bin)
-        .args(args.split_whitespace())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .env("CP_SWITCH_DIR", store_dir_val())
-        .current_dir(project)
-        .output()
-        .unwrap();
-    (output.status.success(),
-     String::from_utf8_lossy(&output.stdout).to_string(),
-     String::from_utf8_lossy(&output.stderr).to_string())
-}
-
-fn run_cli_stdin(args: &str, input: &str, project: &std::path::Path) -> (bool, String, String) {
-    let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
-    let mut child = Command::new(&bin)
-        .args(args.split_whitespace())
+    let mut cmd = Command::new(&bin);
+    cmd.args(args.split_whitespace())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .env("CP_SWITCH_DIR", store_dir_val())
-        .current_dir(project)
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+        .env("CP_SWITCH_DIR", store_dir_val());
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    if let Some(dir) = home {
+        cmd.env("HOME", dir);
+    }
+    let mut child = cmd.spawn().unwrap();
+    // 子进程可能在读 stdin 前就报错退出（如 ProfileExists），此时写入拿到 EPIPE：
+    // 那是被测行为的正常结果，不该让辅助函数 panic
+    let _ = child.stdin.take().unwrap().write_all(input.as_bytes());
     let output = child.wait_with_output().unwrap();
     (output.status.success(),
      String::from_utf8_lossy(&output.stdout).to_string(),
      String::from_utf8_lossy(&output.stderr).to_string())
 }
 
+/// 子进程的原始退出码，用于断言 CsError::exit_code 的对外契约
+fn exit_code(args: &str, project: &std::path::Path) -> i32 {
+    let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
+    Command::new(&bin)
+        .args(args.split_whitespace())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .env("CP_SWITCH_DIR", store_dir_val())
+        .current_dir(project)
+        .status()
+        .unwrap()
+        .code()
+        .unwrap()
+}
+
+fn run_cli(args: &str, project: &std::path::Path) -> (bool, String, String) {
+    spawn_cli(args, "", Some(project), None)
+}
+
+fn run_cli_stdin(args: &str, input: &str, project: &std::path::Path) -> (bool, String, String) {
+    spawn_cli(args, input, Some(project), None)
+}
+
+/// 有 .claude 目录但没有 settings.local.json
 fn setup_project_no_settings() -> TempDir {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = setup_bare_project();
     fs::create_dir_all(dir.path().join(".claude")).unwrap();
     dir
 }
@@ -86,26 +116,18 @@ fn setup_home() -> TempDir {
 }
 
 fn read_user_settings(home: &std::path::Path) -> serde_json::Value {
-    let path = home.join(".claude/settings.json");
-    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap()
+    read_json(home.join(".claude/settings.json"))
+}
+
+/// 预置用户级 settings.json
+fn setup_user_settings(home: &std::path::Path, settings_json: &str) {
+    let claude_dir = home.join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(claude_dir.join("settings.json"), settings_json).unwrap();
 }
 
 fn run_cli_user(args: &str, input: &str, home: &std::path::Path) -> (bool, String, String) {
-    let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
-    let mut child = Command::new(&bin)
-        .args(args.split_whitespace())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .env("CP_SWITCH_DIR", store_dir_val())
-        .env("HOME", home)
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
-    let output = child.wait_with_output().unwrap();
-    (output.status.success(),
-     String::from_utf8_lossy(&output.stdout).to_string(),
-     String::from_utf8_lossy(&output.stderr).to_string())
+    spawn_cli(args, input, None, Some(home))
 }
 
 // ============================================================
@@ -186,7 +208,7 @@ fn test_list_profiles() {
 fn test_merge_clears_old_keys_and_writes_new() {
     let settings = serde_json::json!({"permissions":{"allow":["Bash(ls)"]},"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old-model","ANTHROPIC_SMALL_FAST_MODEL":"old-model","API_TIMEOUT_MS":"3000","OTHER":"keep"}});
     let new_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_API_KEY":"sk-new","ANTHROPIC_MODEL":"new-model","ANTHROPIC_DEFAULT_HAIKU_MODEL":"haiku"});
-    let (merged, _changed, _removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
+    let (merged, _removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://new");
     assert_eq!(env_obj.get("ANTHROPIC_API_KEY").unwrap(), "sk-new");
@@ -205,7 +227,7 @@ fn test_merge_removed_excludes_overwritten_keys() {
         "ANTHROPIC_SMALL_FAST_MODEL":"old",
         "OTHER":"keep"}});
     let new_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://new","ANTHROPIC_API_KEY":"sk-new","ANTHROPIC_DEFAULT_HAIKU_MODEL":"haiku"});
-    let (_merged, _written, mut removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
+    let (_merged, mut removed) = cp_switch::store::merge_env(settings, &new_env).unwrap();
     removed.sort();
     assert_eq!(removed, vec!["ANTHROPIC_SMALL_FAST_MODEL".to_string()]);
 }
@@ -216,8 +238,8 @@ fn test_merge_switch_back_and_forth() {
     let b_env = serde_json::json!({"ANTHROPIC_BASE_URL":"https://b","ANTHROPIC_API_KEY":"sk-b","ANTHROPIC_MODEL":"b"});
     let settings = serde_json::json!({"env":{"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_API_KEY":"sk-a","ANTHROPIC_MODEL":"a"}});
 
-    let (merged, _, _) = cp_switch::store::merge_env(settings, &b_env).unwrap();
-    let (merged, _, _) = cp_switch::store::merge_env(merged, &a_env).unwrap();
+    let (merged, _) = cp_switch::store::merge_env(settings, &b_env).unwrap();
+    let (merged, _) = cp_switch::store::merge_env(merged, &a_env).unwrap();
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
     assert_eq!(env_obj.get("ANTHROPIC_BASE_URL").unwrap(), "https://a");
 }
@@ -225,7 +247,7 @@ fn test_merge_switch_back_and_forth() {
 #[test]
 fn test_merge_creates_env_when_missing() {
     let settings = serde_json::json!({"permissions":{"allow":["Bash"]}});
-    let (merged, _, _) = cp_switch::store::merge_env(settings, &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
+    let (merged, _) = cp_switch::store::merge_env(settings, &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
     assert!(merged.get("env").is_some());
     assert!(merged.get("permissions").is_some());
 }
@@ -233,7 +255,7 @@ fn test_merge_creates_env_when_missing() {
 #[test]
 fn test_merge_with_empty_env() {
     let settings = serde_json::json!({"permissions":{"allow":["Bash"]},"env":{}});
-    let (merged, _, _) = cp_switch::store::merge_env(settings, &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
+    let (merged, _) = cp_switch::store::merge_env(settings, &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
     let env_obj = merged.get("env").unwrap().as_object().unwrap();
     assert_eq!(env_obj.len(), 1);
 }
@@ -657,6 +679,107 @@ fn test_cli_diff_shows_additions_and_deletions() {
 }
 
 #[test]
+fn test_cli_model_in_bare_project_asks_before_creating() {
+    let _store = setup_store();
+    let dir = setup_bare_project();
+    // 活跃标记留在 state.json 里，.claude 却不存在：写 model 前须先确认
+    cp_switch::store::write_current(&dir.path().canonicalize().unwrap(), "claude").unwrap();
+
+    let (ok, stdout, stderr) = run_cli_stdin("model sonnet", "n\n", dir.path());
+    assert!(!ok, "拒绝后应以错误退出");
+    assert!(combined_output(&stdout, &stderr).contains("没有 .claude 目录"));
+    assert!(!dir.path().join(".claude").exists(), "拒绝后不应创建 .claude");
+}
+
+#[test]
+fn test_cli_list_active_with_non_standard_key() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    // edit 会保留非标准 key，use 也照写；list 不该因此把它判成 outdated
+    cp_switch::store::save_profile("legacy", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://legacy", "WEIRD": "w"
+    })).unwrap();
+
+    let (ok, _, stderr) = run_cli("use legacy", dir.path());
+    assert!(ok, "use failed: {}", stderr);
+
+    let (ok, stdout, stderr) = run_cli("list", dir.path());
+    assert!(ok, "list failed: {}", stderr);
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("(active)"), "应为 active: {}", out);
+    assert!(!out.contains("outdated"), "不应为 outdated: {}", out);
+}
+
+#[test]
+fn test_cli_diff_no_blank_lines_between_changes() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://old"}}"#);
+    cp_switch::store::save_profile("tight", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://new", "ANTHROPIC_MODEL": "m"
+    })).unwrap();
+
+    let (ok, stdout, stderr) = run_cli("diff tight", dir.path());
+    assert!(ok, "diff failed: {}", stderr);
+    // 每行差异后不应跟一个空行（源行自带的换行须先去掉）
+    let body: Vec<&str> = stdout.lines().collect();
+    assert!(body.len() > 2, "diff 输出过短: {:?}", body);
+    assert!(!body.iter().any(|l| l.is_empty()), "diff 输出含空行: {:?}", body);
+}
+
+#[test]
+fn test_cli_diff_in_bare_project_no_prompt() {
+    let _store = setup_store();
+    let dir = setup_bare_project();
+    cp_switch::store::save_profile("bare", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://bare", "ANTHROPIC_MODEL": "m-bare"
+    })).unwrap();
+
+    // 只读命令：没有 .claude 也直接按空 env 比较，不提示、不创建
+    let (ok, stdout, stderr) = run_cli("diff bare", dir.path());
+    assert!(ok, "diff failed: {}", stderr);
+    assert!(!combined_output(&stdout, &stderr).contains("没有 .claude 目录"));
+    assert!(stdout.contains("+++ profile: bare"));
+    assert!(stdout.contains("ANTHROPIC_BASE_URL"));
+    assert!(!dir.path().join(".claude").exists());
+}
+
+#[test]
+fn test_cli_diff_invalid_name_rejected_at_boundary() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 名字校验统一在 CLI 边界，diff 也不再漏掉
+    let (ok, _, stderr) = run_cli("diff bad!name", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("Invalid profile name"), "stderr: {}", stderr);
+    assert_eq!(exit_code("diff bad!name", dir.path()), 5);
+
+    // use claude 不受影响：内置名是合法的引用目标
+    let (ok, _, stderr) = run_cli_stdin("use claude", "y\n", dir.path());
+    assert!(ok, "use claude failed: {}", stderr);
+}
+
+#[test]
+fn test_cli_boundary_validation_covers_all_name_commands() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 五个带 name 的子命令都在边界被拦下，错误一致
+    for args in ["add bad!name", "edit bad!name", "delete bad!name", "use bad!name", "diff bad!name"] {
+        let (ok, _, stderr) = run_cli(args, dir.path());
+        assert!(!ok, "{} 应当失败", args);
+        assert!(stderr.contains("Invalid profile name"), "{} → {}", args, stderr);
+    }
+
+    // 保留名只被写类命令拒绝，引用类命令放行
+    for args in ["add claude", "edit claude", "delete claude"] {
+        let (ok, _, stderr) = run_cli(args, dir.path());
+        assert!(!ok, "{} 应当失败", args);
+        assert!(stderr.contains("is reserved"), "{} → {}", args, stderr);
+    }
+}
+
+#[test]
 fn test_cli_diff_identical_no_changes() {
     let _store = setup_store();
     let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_MODEL":"x"}}"#);
@@ -723,8 +846,7 @@ fn test_cli_add_empty_required_retries() {
 fn test_cli_use_creates_settings_in_brand_new_project() {
     let _store = setup_store();
     // 完全新项目：连 .claude 目录都不存在，需要确认新建
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".claude").exists());
+    let dir = setup_bare_project();
 
     cp_switch::store::save_profile("brandnew", &serde_json::json!({
         "ANTHROPIC_BASE_URL": "https://new", "ANTHROPIC_API_KEY": "sk-new", "ANTHROPIC_MODEL": "new"
@@ -749,8 +871,7 @@ fn test_cli_use_creates_settings_in_brand_new_project() {
 fn test_cli_use_reject_create_no_claude_dir() {
     let _store = setup_store();
     // 完全新项目：拒绝新建 .claude 目录应报错退出
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".claude").exists());
+    let dir = setup_bare_project();
 
     cp_switch::store::save_profile("reject", &serde_json::json!({
         "ANTHROPIC_BASE_URL": "https://r", "ANTHROPIC_API_KEY": "sk-r"
@@ -928,10 +1049,7 @@ fn test_cli_delete_nonactive_no_force() {
 fn test_cli_use_corrupted_settings() {
     let _store = setup_store();
     // settings.local.json 存在但内容是非法 JSON
-    let dir = tempfile::tempdir().unwrap();
-    let claude_dir = dir.path().join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(claude_dir.join("settings.local.json"), "{invalid json!!!}").unwrap();
+    let dir = setup_project("{invalid json!!!}");
 
     cp_switch::store::save_profile("test", &serde_json::json!({
         "ANTHROPIC_BASE_URL": "https://a", "ANTHROPIC_API_KEY": "sk-a", "ANTHROPIC_MODEL": "a"
@@ -961,10 +1079,7 @@ fn test_write_settings_creates_backup() {
     // 备份文件应存在且内容与原始一致
     let bak_path = dir.path().join(".claude/settings.local.json.bak");
     assert!(bak_path.exists());
-    let bak_content: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(&bak_path).unwrap()
-    ).unwrap();
-    assert_eq!(bak_content, original);
+    assert_eq!(read_json(&bak_path), original);
 }
 
 #[test]
@@ -1010,12 +1125,12 @@ fn test_write_settings_backup_overwrites_on_successive_use() {
     // 第一次 use：备份应为原始内容
     run_cli("use a", dir.path());
     let bak_path = dir.path().join(".claude/settings.local.json.bak");
-    let bak1: serde_json::Value = serde_json::from_str(&fs::read_to_string(&bak_path).unwrap()).unwrap();
+    let bak1 = read_json(&bak_path);
     assert_eq!(bak1.get("env").unwrap().get("ANTHROPIC_BASE_URL").unwrap(), "https://original");
 
     // 第二次 use：备份应为 use a 后的内容，不是原始内容
     run_cli("use b", dir.path());
-    let bak2: serde_json::Value = serde_json::from_str(&fs::read_to_string(&bak_path).unwrap()).unwrap();
+    let bak2 = read_json(&bak_path);
     assert_eq!(bak2.get("env").unwrap().get("ANTHROPIC_BASE_URL").unwrap(), "https://a");
 }
 
@@ -1059,8 +1174,7 @@ fn test_state_migration_from_old_format() {
     assert!(!store_dir.join("current").exists());
 
     // state.json 内容正确
-    let state_content: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    let state_content = read_json(&state_path);
     let profiles_obj = state_content.get("profiles").unwrap().as_object().unwrap();
     assert_eq!(profiles_obj.len(), 2);
     assert_eq!(
@@ -1070,6 +1184,34 @@ fn test_state_migration_from_old_format() {
     assert_eq!(state_content.get("user_current").unwrap(), "work");
     // project_currents 不迁移（旧版用不可逆的 hash 路径），字段为空则被跳过
     assert!(state_content.get("project_currents").is_none());
+}
+
+#[test]
+fn test_state_json_keys_sorted_and_byte_stable() {
+    let _store = setup_store();
+    let state_path = std::path::Path::new(&store_dir_val()).join("state.json");
+
+    // 故意按非字典序创建
+    for name in ["zebra", "alpha", "middle"] {
+        cp_switch::store::save_profile(name, &serde_json::json!({"ANTHROPIC_MODEL": name})).unwrap();
+    }
+
+    // 落盘文本里 key 即字典序（HashMap 的迭代序每进程随机，会让顺序每次写盘都变）
+    let text = fs::read_to_string(&state_path).unwrap();
+    let pos = |k: &str| text.find(&format!("\"{}\"", k)).unwrap();
+    assert!(pos("alpha") < pos("middle"), "{}", text);
+    assert!(pos("middle") < pos("zebra"), "{}", text);
+
+    // 内容不变的重复写盘应产出完全相同的字节
+    cp_switch::store::save_profile("middle", &serde_json::json!({"ANTHROPIC_MODEL": "middle"})).unwrap();
+    assert_eq!(fs::read_to_string(&state_path).unwrap(), text);
+
+    // project_currents 同样有序
+    for p in ["/tmp/zzz", "/tmp/aaa"] {
+        cp_switch::store::write_current(std::path::Path::new(p), "alpha").unwrap();
+    }
+    let text = fs::read_to_string(&state_path).unwrap();
+    assert!(text.find("/tmp/aaa").unwrap() < text.find("/tmp/zzz").unwrap(), "{}", text);
 }
 
 #[test]
@@ -1102,8 +1244,7 @@ fn test_state_json_fresh_creates_default() {
     assert!(state_path.exists());
 
     // 内容是合法的空 state（空 map 被 skip_serializing_if 跳过）
-    let state_content: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    let state_content = read_json(&state_path);
     assert!(state_content.get("profiles").is_none());
     assert!(state_content.get("project_currents").is_none());
     assert!(state_content.get("user_current").is_none());
@@ -1295,9 +1436,7 @@ fn test_cli_use_user_preserves_permissions() {
     let home_path = home.path().to_path_buf();
 
     // 先创建 ~/home/.claude/settings.json 带 permissions
-    let claude_dir = home_path.join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(claude_dir.join("settings.json"), r#"{"permissions":{"allow":["Bash(ls)"]},"env":{"ANTHROPIC_MODEL":"old"}}"#).unwrap();
+    setup_user_settings(&home_path, r#"{"permissions":{"allow":["Bash(ls)"]},"env":{"ANTHROPIC_MODEL":"old"}}"#);
 
     cp_switch::store::save_profile("perm-test", &serde_json::json!({
         "ANTHROPIC_BASE_URL": "https://p", "ANTHROPIC_API_KEY": "sk-p", "ANTHROPIC_MODEL": "p"
@@ -1408,7 +1547,61 @@ fn test_cli_add_claude_rejected() {
     let dir = setup_project(r#"{"env":{}}"#);
     let (ok, _, stderr) = run_cli("add claude", dir.path());
     assert!(!ok);
-    assert!(stderr.contains("Invalid profile name"));
+    // 拒绝理由是「保留名」，不是「名字里有非法字符」
+    assert!(stderr.contains("is reserved"), "stderr: {}", stderr);
+    assert!(!stderr.contains("Invalid profile name"));
+    assert!(stderr.contains("cp-switch use claude"));
+}
+
+#[test]
+fn test_reserved_and_invalid_name_share_exit_code() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 对脚本而言两者是同一类「名字不能用」，退出码保持一致
+    let reserved = spawn_cli("add claude", "", Some(dir.path()), None);
+    let invalid = spawn_cli("add bad!name", "", Some(dir.path()), None);
+    assert!(!reserved.0 && !invalid.0);
+    assert_eq!(exit_code("add claude", dir.path()), 5);
+    assert_eq!(exit_code("add bad!name", dir.path()), 5);
+
+    // claude 本身是合法名字，只是被 cp-switch 占用
+    assert!(cp_switch::cli::validate_name("claude").is_ok());
+    assert!(cp_switch::cli::ensure_not_reserved("claude").is_err());
+}
+
+#[test]
+fn test_cli_add_eof_before_required_field() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // stdin 直接 EOF：必填字段拿不到值应立即报错，而不是无限重问
+    let (ok, _stdout, stderr) = run_cli("add eof-probe", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("Input ended before"), "stderr: {}", stderr);
+    assert!(stderr.contains("ANTHROPIC_BASE_URL"));
+    // 报错前只提示一次「is required」，没有重试风暴
+    assert!(stderr.matches("is required").count() <= 1, "stderr: {}", stderr);
+    assert!(cp_switch::store::list_profiles().unwrap().is_empty());
+}
+
+#[test]
+fn test_cli_add_eof_after_required_fields_keeps_defaults() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 只喂 3 个必填字段，其余可选字段靠 EOF 走默认值——这是固件依赖的行为
+    let (ok, _stdout, stderr) =
+        run_cli_stdin("add eof-tail", "https://e.com\nsk-e\nmodel-e\n", dir.path());
+    assert!(ok, "add failed: {}", stderr);
+
+    let profile = cp_switch::store::read_profile("eof-tail").unwrap();
+    assert_eq!(profile.get("ANTHROPIC_BASE_URL").unwrap(), "https://e.com");
+    // 派生模型与 EFFORT 取默认值
+    assert_eq!(profile.get("ANTHROPIC_DEFAULT_OPUS_MODEL").unwrap(), "model-e");
+    assert_eq!(profile.get("CLAUDE_CODE_EFFORT_LEVEL").unwrap(), "high");
+    // 真正可选的 WINDOW 不注入
+    assert!(profile.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW").is_none());
 }
 
 #[test]
@@ -1417,7 +1610,8 @@ fn test_cli_delete_claude_rejected() {
     let dir = setup_project(r#"{"env":{}}"#);
     let (ok, _, stderr) = run_cli("delete claude", dir.path());
     assert!(!ok);
-    assert!(stderr.contains("Invalid profile name"));
+    assert!(stderr.contains("is reserved"), "stderr: {}", stderr);
+    assert!(!stderr.contains("Invalid profile name"));
 }
 
 #[test]
@@ -1452,8 +1646,7 @@ fn test_cli_use_claude_clears_env() {
 #[test]
 fn test_cli_use_claude_reject_create_no_claude_dir() {
     let _store = setup_store();
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".claude").exists());
+    let dir = setup_bare_project();
 
     // 拒绝后不应建出 .claude，也不应把该目录登记进 project_currents
     let (ok, _stdout, stderr) = run_cli_stdin("use claude", "n\n", dir.path());
@@ -1470,9 +1663,7 @@ fn test_cli_use_claude_user() {
     let home_path = home.path().to_path_buf();
 
     // 预设用户 settings
-    let claude_dir = home_path.join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(claude_dir.join("settings.json"), r#"{"permissions":{"allow":["Bash"]},"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old","OTHER":"keep"}}"#).unwrap();
+    setup_user_settings(&home_path, r#"{"permissions":{"allow":["Bash"]},"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old","OTHER":"keep"}}"#);
 
     let (ok, stdout, stderr) = run_cli_user("use --user claude", "", &home_path);
     assert!(ok, "use --user claude failed: {}", stderr);
@@ -1524,8 +1715,7 @@ fn test_cli_use_claude_then_switch_back() {
 fn test_cli_use_claude_on_clean_project() {
     let _store = setup_store();
     // 新项目连 .claude 目录都没有
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".claude").exists());
+    let dir = setup_bare_project();
 
     // use claude 同样需要确认创建 .claude
     let (ok, stdout, stderr) = run_cli_stdin("use claude", "y\n", dir.path());
@@ -1579,7 +1769,8 @@ fn test_cli_edit_claude_rejected() {
     let dir = setup_project(r#"{"env":{}}"#);
     let (ok, _, stderr) = run_cli("edit claude", dir.path());
     assert!(!ok);
-    assert!(stderr.contains("Invalid profile name"));
+    assert!(stderr.contains("is reserved"), "stderr: {}", stderr);
+    assert!(!stderr.contains("Invalid profile name"));
 }
 
 #[test]

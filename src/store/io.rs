@@ -1,11 +1,12 @@
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use crate::error::{CsError, io_err, json_err, serialization_err};
+
+use super::merge::managed_env;
+use super::path::{settings_local_path, state_path};
 use super::state::State;
-use super::path::{settings_local_path, user_settings_path, state_path};
-use super::keys::is_claude_env_key;
+use crate::error::{CsError, io_err, json_err, serialization_err};
 
 fn sibling_path(path: &Path, suffix: &str) -> PathBuf {
     let file_name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -23,7 +24,7 @@ pub(crate) fn atomic_write(path: &Path, content: &str) -> Result<(), CsError> {
 
 // ── state 读写 ──
 
-fn read_state() -> Result<State, CsError> {
+pub(crate) fn read_state() -> Result<State, CsError> {
     let path = state_path();
     match fs::read_to_string(&path) {
         Ok(content) => serde_json::from_str(&content).map_err(|e| json_err(&path, e)),
@@ -42,6 +43,13 @@ fn write_state(state: &State) -> Result<(), CsError> {
     atomic_write(&state_path(), &json)
 }
 
+/// read→mutate→write 的公共封装，单次读单次写
+pub(crate) fn update_state(mutate: impl FnOnce(&mut State)) -> Result<(), CsError> {
+    let mut state = read_state()?;
+    mutate(&mut state);
+    write_state(&state)
+}
+
 /// 从旧版文件夹格式迁移到 state.json
 fn try_migrate() -> Result<State, CsError> {
     let dir = state_path().parent().unwrap().to_path_buf();
@@ -52,14 +60,12 @@ fn try_migrate() -> Result<State, CsError> {
     if let Ok(entries) = fs::read_dir(&profiles_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        if let Ok(value) = serde_json::from_str(&content) {
-                            state.profiles.insert(name.to_string(), value);
-                        }
-                    }
-                }
+            if path.extension().is_some_and(|ext| ext == "json")
+                && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(content) = fs::read_to_string(&path)
+                && let Ok(value) = serde_json::from_str(&content)
+            {
+                state.profiles.insert(name.to_string(), value);
             }
         }
     }
@@ -74,7 +80,7 @@ fn try_migrate() -> Result<State, CsError> {
     }
 
     // 清理旧文件（忽略错误，state.json 已写好即可）
-    let _ = fs::remove_dir_all(&dir.join("projects"));
+    let _ = fs::remove_dir_all(dir.join("projects"));
     let _ = fs::remove_dir_all(&profiles_dir);
     let _ = fs::remove_file(&uc_path);
 
@@ -83,153 +89,121 @@ fn try_migrate() -> Result<State, CsError> {
 
 // ── profiles ──
 
+/// 排序后的 profile 名单，用于列表展示与「可用值」提示（BTreeMap 的迭代序即字典序）
+pub(crate) fn sorted_names(state: State) -> Vec<String> {
+    state.profiles.into_keys().collect()
+}
+
 pub fn list_profiles() -> Result<Vec<String>, CsError> {
-    let state = read_state()?;
-    let mut names: Vec<String> = state.profiles.into_keys().collect();
-    names.sort();
-    Ok(names)
+    Ok(sorted_names(read_state()?))
+}
+
+pub fn profile_exists(name: &str) -> Result<bool, CsError> {
+    Ok(read_state()?.profiles.contains_key(name))
+}
+
+fn not_found(name: &str, state: State) -> CsError {
+    CsError::ProfileNotFound { name: name.into(), available: sorted_names(state) }
 }
 
 pub fn read_profile(name: &str) -> Result<Value, CsError> {
-    let state = read_state()?;
-    match state.profiles.get(name) {
-        Some(v) => Ok(v.clone()),
-        None => {
-            let available = state.profiles.into_keys().collect();
-            Err(CsError::ProfileNotFound { name: name.into(), available })
-        }
+    let mut state = read_state()?;
+    match state.profiles.remove(name) {
+        Some(value) => Ok(value),
+        None => Err(not_found(name, state)),
     }
 }
 
 pub fn save_profile(name: &str, content: &Value) -> Result<(), CsError> {
+    update_state(|state| {
+        state.profiles.insert(name.to_string(), content.clone());
+    })
+}
+
+/// 删除 profile，并按需一并清理项目级 / 用户级活跃标记（单次读单次写）
+pub fn delete_profile_and_clear(
+    name: &str,
+    clear_project: Option<&Path>,
+    clear_user: bool,
+) -> Result<(), CsError> {
     let mut state = read_state()?;
-    state.profiles.insert(name.to_string(), content.clone());
+    if state.profiles.remove(name).is_none() {
+        return Err(not_found(name, state));
+    }
+    if let Some(project) = clear_project {
+        state.project_currents.remove(&current_key(project));
+    }
+    if clear_user {
+        state.user_current = None;
+    }
     write_state(&state)
 }
 
 pub fn delete_profile(name: &str) -> Result<(), CsError> {
-    let mut state = read_state()?;
-    if state.profiles.remove(name).is_none() {
-        let available: Vec<String> = state.profiles.into_keys().collect();
-        return Err(CsError::ProfileNotFound { name: name.into(), available });
-    }
-    write_state(&state)
+    delete_profile_and_clear(name, None, false)
 }
 
-// ── 项目级 current ──
+// ── current 标记 ──
+//
+// 「项目级还是用户级」这个区分由 store::scope 统一持有，这里只提供旧的按级别命名的入口。
 
-fn current_key(project: &Path) -> String {
+pub(crate) fn current_key(project: &Path) -> String {
     project.to_string_lossy().to_string()
 }
 
 pub fn read_current(project: &Path) -> Result<Option<String>, CsError> {
-    let state = read_state()?;
-    Ok(state.project_currents.get(&current_key(project)).cloned())
+    Ok(read_state()?.project_currents.remove(&current_key(project)))
 }
 
 pub fn write_current(project: &Path, name: &str) -> Result<(), CsError> {
-    let mut state = read_state()?;
-    state.project_currents.insert(current_key(project), name.to_string());
-    write_state(&state)
+    update_state(|state| {
+        state.project_currents.insert(current_key(project), name.to_string());
+    })
 }
 
 pub fn clear_current(project: &Path) -> Result<(), CsError> {
-    let mut state = read_state()?;
-    state.project_currents.remove(&current_key(project));
-    write_state(&state)
+    update_state(|state| {
+        state.project_currents.remove(&current_key(project));
+    })
 }
 
-// ── 用户级 current ──
+/// 一次 state 读取同时取出项目级与用户级活跃 profile（delete 需要同时看两边）
+pub fn read_currents(project: &Path) -> Result<(Option<String>, Option<String>), CsError> {
+    let mut state = read_state()?;
+    Ok((state.project_currents.remove(&current_key(project)), state.user_current))
+}
 
 pub fn read_user_current() -> Result<Option<String>, CsError> {
-    let state = read_state()?;
-    Ok(state.user_current)
+    Ok(read_state()?.user_current)
 }
 
-pub fn write_user_current(name: &str) -> Result<(), CsError> {
-    let mut state = read_state()?;
-    state.user_current = Some(name.to_string());
-    write_state(&state)
+// ── settings 读写（项目级与用户级共用同一套逻辑）──
+
+fn default_settings() -> Value {
+    serde_json::json!({"permissions": {"allow": [], "deny": []}, "env": {}})
 }
 
-pub fn clear_user_current() -> Result<(), CsError> {
-    let mut state = read_state()?;
-    state.user_current = None;
-    write_state(&state)
-}
-
-// ── settings 本地读写（不变 ──
-
-pub fn read_settings_local(project: &Path) -> Result<Value, CsError> {
-    let path = settings_local_path(project);
-    match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).map_err(|e| json_err(&path, e)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Ok(serde_json::json!({"permissions": {"allow": [], "deny": []}, "env": {}}))
-        }
-        Err(e) => Err(io_err(&path, e)),
+pub(crate) fn read_settings_file(path: &Path) -> Result<Value, CsError> {
+    match fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content).map_err(|e| json_err(path, e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(default_settings()),
+        Err(e) => Err(io_err(path, e)),
     }
 }
 
-pub fn write_settings_local(project: &Path, content: &Value) -> Result<(), CsError> {
-    let path = settings_local_path(project);
-
-    let bak = sibling_path(&path, ".bak");
-    match fs::copy(&path, &bak) {
-        Ok(_) => {},
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+pub(crate) fn write_settings_file(path: &Path, content: &Value) -> Result<(), CsError> {
+    let bak = sibling_path(path, ".bak");
+    match fs::copy(path, &bak) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(io_err(&bak, e)),
     }
 
-    let json = serde_json::to_string_pretty(content).map_err(|e| serialization_err(&path.display().to_string(), e))?;
-    atomic_write(&path, &json)
+    let json = serde_json::to_string_pretty(content)
+        .map_err(|e| serialization_err(&path.display().to_string(), e))?;
+    atomic_write(path, &json)
 }
 
 pub fn read_current_env(project: &Path) -> Result<Value, CsError> {
-    let settings = read_settings_local(project)?;
-    filter_claude_env(&settings)
-}
-
-fn filter_claude_env(settings: &Value) -> Result<Value, CsError> {
-    let env = settings.get("env").cloned().unwrap_or(Value::Object(serde_json::Map::new()));
-    let env_obj = env.as_object()
-        .ok_or(CsError::MalformedJson { detail: "\"env\" field must be a JSON object".into() })?;
-    let filtered: serde_json::Map<String, Value> = env_obj
-        .iter()
-        .filter(|(k, _)| is_claude_env_key(k))
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    Ok(Value::Object(filtered))
-}
-
-// ── 用户级 settings ──
-
-pub fn read_user_settings() -> Result<Value, CsError> {
-    let path = user_settings_path();
-    match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).map_err(|e| json_err(&path, e)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Ok(serde_json::json!({"permissions": {"allow": [], "deny": []}, "env": {}}))
-        }
-        Err(e) => Err(io_err(&path, e)),
-    }
-}
-
-pub fn write_user_settings(content: &Value) -> Result<(), CsError> {
-    let path = user_settings_path();
-
-    let bak = sibling_path(&path, ".bak");
-    match fs::copy(&path, &bak) {
-        Ok(_) => {},
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-        Err(e) => return Err(io_err(&bak, e)),
-    }
-
-    let json = serde_json::to_string_pretty(content).map_err(|e| serialization_err(&path.display().to_string(), e))?;
-    atomic_write(&path, &json)
-}
-
-pub fn read_user_current_env() -> Result<Value, CsError> {
-    let settings = read_user_settings()?;
-    filter_claude_env(&settings)
+    managed_env(&read_settings_file(&settings_local_path(project))?)
 }
