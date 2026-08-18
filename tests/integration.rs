@@ -300,6 +300,30 @@ fn test_clear_env_removes_all_managed_keys() {
     assert_eq!(removed.len(), 11);
 }
 
+#[test]
+fn test_clear_env_keeps_missing_env_missing() {
+    let settings = serde_json::json!({"permissions": {"allow": ["Bash"]}});
+    let (merged, removed) = cp_switch::store::clear_env(settings).unwrap();
+    // 原本没有 env，清除后不应凭空多出 "env": {}
+    assert!(merged.get("env").is_none());
+    assert!(removed.is_empty());
+    assert!(merged.get("permissions").is_some());
+}
+
+#[test]
+fn test_clear_env_drops_env_when_emptied() {
+    let settings = serde_json::json!({
+        "model": "claude-fable-5",
+        "env": {"ANTHROPIC_BASE_URL": "https://x", "ANTHROPIC_API_KEY": "sk-x"}
+    });
+    let (merged, removed) = cp_switch::store::clear_env(settings).unwrap();
+    // env 里只剩受管 key，清空后整个字段一并删除
+    assert!(merged.get("env").is_none());
+    assert_eq!(removed.len(), 2);
+    // 顶层 model 不受影响
+    assert_eq!(merged.get("model").unwrap(), "claude-fable-5");
+}
+
 // ============================================================
 // set_model / clear_model 纯函数测试
 // ============================================================
@@ -1426,6 +1450,20 @@ fn test_cli_use_claude_clears_env() {
 }
 
 #[test]
+fn test_cli_use_claude_reject_create_no_claude_dir() {
+    let _store = setup_store();
+    let dir = tempfile::tempdir().unwrap();
+    assert!(!dir.path().join(".claude").exists());
+
+    // 拒绝后不应建出 .claude，也不应把该目录登记进 project_currents
+    let (ok, _stdout, stderr) = run_cli_stdin("use claude", "n\n", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("当前目录没有 .claude 目录"));
+    assert!(!dir.path().join(".claude").exists());
+    assert_eq!(read_current_canonical(dir.path()), None);
+}
+
+#[test]
 fn test_cli_use_claude_user() {
     let _store = setup_store();
     let home = setup_home();
@@ -1489,7 +1527,7 @@ fn test_cli_use_claude_on_clean_project() {
     let dir = tempfile::tempdir().unwrap();
     assert!(!dir.path().join(".claude").exists());
 
-    // use claude 需要确认创建 .claude
+    // use claude 同样需要确认创建 .claude
     let (ok, stdout, stderr) = run_cli_stdin("use claude", "y\n", dir.path());
     assert!(ok, "use claude on clean project failed: {}", stderr);
     let out = combined_output(&stdout, &stderr);
@@ -1498,10 +1536,8 @@ fn test_cli_use_claude_on_clean_project() {
     // .claude 被创建
     assert!(dir.path().join(".claude/settings.local.json").exists());
     let settings = read_settings(dir.path());
-    // 没有 managed keys
-    let env_obj = get_env_obj(&settings);
-    assert!(!env_obj.contains_key("ANTHROPIC_BASE_URL"));
-    assert_eq!(env_obj.len(), 0);
+    // 原本没有 env，切到官方直连不应造出空的 env 字段
+    assert!(settings.get("env").is_none());
 
     // current 标记为 claude
     assert_eq!(read_current_canonical(dir.path()), Some("claude".to_string()));
@@ -1633,7 +1669,8 @@ fn test_cli_model_refused_on_third_party_profile() {
 #[test]
 fn test_cli_model_set_and_show_on_claude() {
     let _store = setup_store();
-    let dir = setup_project(r#"{"env":{}}"#);
+    // 带一个非受管 key，用于验证 model 命令不碰 env
+    let dir = setup_project(r#"{"env":{"OTHER":"keep"}}"#);
     // 切到官方直连
     run_cli("use claude", dir.path());
 
@@ -1645,7 +1682,7 @@ fn test_cli_model_set_and_show_on_claude() {
     // 顶层 model 字段写入，env 不受影响
     let settings = read_settings(dir.path());
     assert_eq!(settings.get("model").unwrap(), "claude-fable-5[1m]");
-    assert!(settings.get("env").is_some());
+    assert_eq!(get_env_obj(&settings).get("OTHER").unwrap(), "keep");
 
     // 无参展示当前值
     let (ok, stdout, stderr) = run_cli("model", dir.path());

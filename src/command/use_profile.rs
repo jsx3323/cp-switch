@@ -12,13 +12,7 @@ pub fn run(name: &str, project: &Path) -> Result<(), CsError> {
         return run_claude_project(project);
     }
     validate_name(name)?;
-
-    if !has_claude_dir(project) {
-        output::warn("当前目录没有 .claude 目录");
-        if !input::prompt_confirm("是否新建 .claude/settings.local.json？")? {
-            return Err(CsError::NoClaudeDir);
-        }
-    }
+    ensure_claude_dir(project)?;
 
     let env_values = read_profile(name)?;
     let settings = read_settings_local(project)?;
@@ -58,7 +52,21 @@ pub fn run_user(name: &str) -> Result<(), CsError> {
     Ok(())
 }
 
+/// 项目无 .claude 目录时先征得同意，避免在非项目目录里凭空建出 settings 文件
+fn ensure_claude_dir(project: &Path) -> Result<(), CsError> {
+    if has_claude_dir(project) {
+        return Ok(());
+    }
+    output::warn("当前目录没有 .claude 目录");
+    if !input::prompt_confirm("是否新建 .claude/settings.local.json？")? {
+        return Err(CsError::NoClaudeDir);
+    }
+    Ok(())
+}
+
 fn run_claude_project(project: &Path) -> Result<(), CsError> {
+    ensure_claude_dir(project)?;
+
     let settings = read_settings_local(project)?;
     let (merged, removed) = clear_env(settings)?;
     write_settings_local(project, &merged)?;

@@ -39,11 +39,12 @@ pub fn merge_env(mut settings: Value, env_values: &Value) -> Result<(Value, Vec<
 /// 清除 settings env 中所有受管理的 ANTHROPIC_* / CLAUDE_CODE_* key。
 /// 返回 (新的 settings, 被移除的 key 列表)。
 pub fn clear_env(mut settings: Value) -> Result<(Value, Vec<String>), CsError> {
-    let settings_env = settings
-        .as_object_mut()
-        .ok_or(CsError::MalformedJson { detail: "settings must be a JSON object".into() })?
-        .entry("env")
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    let obj = settings.as_object_mut()
+        .ok_or(CsError::MalformedJson { detail: "settings must be a JSON object".into() })?;
+    // 纯移除操作：env 本就不存在时保持不存在，不凭空写出空字段污染用户手写的 settings
+    let Some(settings_env) = obj.get_mut("env") else {
+        return Ok((settings, Vec::new()));
+    };
     let env_obj = settings_env.as_object_mut()
         .ok_or(CsError::MalformedJson { detail: "\"env\" field must be a JSON object".into() })?;
 
@@ -56,6 +57,12 @@ pub fn clear_env(mut settings: Value) -> Result<(Value, Vec<String>), CsError> {
             true
         }
     });
+    let now_empty = env_obj.is_empty();
+
+    // 清空后连字段一起删掉，与「env 缺失时不创建」保持一致
+    if now_empty {
+        obj.remove("env");
+    }
 
     Ok((settings, removed))
 }
