@@ -7,6 +7,7 @@ pub mod edit;
 pub mod list;
 pub mod model;
 pub mod prompt;
+pub mod rename;
 pub mod use_profile;
 
 use crate::error::CsError;

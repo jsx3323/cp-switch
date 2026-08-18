@@ -120,8 +120,14 @@ pub fn save_profile(name: &str, content: &Value) -> Result<(), CsError> {
     })
 }
 
-/// 复制 profile（单次读单次写）。返回 dst 是否已存在——即这次是覆盖而非新建。
-pub fn copy_profile(src: &str, dst: &str, force: bool) -> Result<bool, CsError> {
+/// copy 与 rename 的唯一差别：是否摘掉源 profile 并把活跃标记迁到新名下
+pub(crate) enum Transfer {
+    Copy,
+    Rename,
+}
+
+/// copy / rename 的公共实现（单次读单次写）。返回 dst 是否已存在——即这次是覆盖而非新建。
+fn transfer_profile(src: &str, dst: &str, force: bool, mode: Transfer) -> Result<bool, CsError> {
     let mut state = read_state()?;
     // 先克隆再插入：src == dst 且带 force 时不至于把源摘空
     let Some(value) = state.profiles.get(src).cloned() else {
@@ -131,9 +137,29 @@ pub fn copy_profile(src: &str, dst: &str, force: bool) -> Result<bool, CsError> 
     if existed && !force {
         return Err(CsError::ProfileExists { name: dst.into() });
     }
+    if matches!(mode, Transfer::Rename) {
+        state.profiles.remove(src);
+        // 活跃标记按名字存储，不跟着改名会让所有指向旧名的项目变成 missing
+        for current in state.project_currents.values_mut() {
+            if current == src {
+                *current = dst.to_string();
+            }
+        }
+        if state.user_current.as_deref() == Some(src) {
+            state.user_current = Some(dst.to_string());
+        }
+    }
     state.profiles.insert(dst.to_string(), value);
     write_state(&state)?;
     Ok(existed)
+}
+
+pub fn copy_profile(src: &str, dst: &str, force: bool) -> Result<bool, CsError> {
+    transfer_profile(src, dst, force, Transfer::Copy)
+}
+
+pub fn rename_profile(src: &str, dst: &str, force: bool) -> Result<bool, CsError> {
+    transfer_profile(src, dst, force, Transfer::Rename)
 }
 
 /// 删除 profile，并按需一并清理项目级 / 用户级活跃标记（单次读单次写）

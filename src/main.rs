@@ -27,6 +27,7 @@ fn run(cli: Cli) -> Result<(), CsError> {
         Commands::Diff { name, user } => command::diff::run(&name, &Scope::from_flag(user)?),
         Commands::Edit { name } => command::edit::run(&name),
         Commands::Copy { src, dst, force } => command::copy::run(&src, &dst, force),
+        Commands::Rename { src, dst, force } => command::rename::run(&src, &dst, force),
         Commands::Model { value, clear, user } => {
             command::model::run(value, clear, &Scope::from_flag(user)?)
         }
