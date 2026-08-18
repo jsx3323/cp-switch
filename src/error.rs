@@ -17,6 +17,7 @@ pub enum CsError {
     #[error("Invalid profile name '{name}'. Use only letters, digits, hyphens, and underscores.")]
     InvalidProfileName { name: String },
 
+
     #[error("I/O error at {path}: {source}")]
     Io {
         path: String,
@@ -46,6 +47,9 @@ pub enum CsError {
 
     #[error("Invalid model value (must not be empty)")]
     InvalidModel,
+
+    #[error("Input ended before '{field}' was provided")]
+    MissingInput { field: String },
 }
 
 impl CsError {
@@ -62,6 +66,7 @@ impl CsError {
             CsError::NoClaudeDir => 10,
             CsError::ModelRequiresClaude => 11,
             CsError::InvalidModel => 12,
+            CsError::MissingInput { .. } => 13,
         }
     }
 
@@ -78,6 +83,9 @@ impl CsError {
             }
             CsError::ModelRequiresClaude => {
                 Some("先运行 'cp-switch use claude' 切换到官方直连，再设置 model".into())
+            }
+            CsError::MissingInput { .. } => {
+                Some("非交互运行时需要把全部必填字段一并喂给 stdin".into())
             }
             _ => None,
         }

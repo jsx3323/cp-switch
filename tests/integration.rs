@@ -1404,6 +1404,40 @@ fn test_cli_add_claude_rejected() {
 }
 
 #[test]
+fn test_cli_add_eof_before_required_field() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // stdin 直接 EOF：必填字段拿不到值应立即报错，而不是无限重问
+    let (ok, _stdout, stderr) = run_cli("add eof-probe", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("Input ended before"), "stderr: {}", stderr);
+    assert!(stderr.contains("ANTHROPIC_BASE_URL"));
+    // 报错前只提示一次「is required」，没有重试风暴
+    assert!(stderr.matches("is required").count() <= 1, "stderr: {}", stderr);
+    assert!(cp_switch::store::list_profiles().unwrap().is_empty());
+}
+
+#[test]
+fn test_cli_add_eof_after_required_fields_keeps_defaults() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 只喂 3 个必填字段，其余可选字段靠 EOF 走默认值——这是固件依赖的行为
+    let (ok, _stdout, stderr) =
+        run_cli_stdin("add eof-tail", "https://e.com\nsk-e\nmodel-e\n", dir.path());
+    assert!(ok, "add failed: {}", stderr);
+
+    let profile = cp_switch::store::read_profile("eof-tail").unwrap();
+    assert_eq!(profile.get("ANTHROPIC_BASE_URL").unwrap(), "https://e.com");
+    // 派生模型与 EFFORT 取默认值
+    assert_eq!(profile.get("ANTHROPIC_DEFAULT_OPUS_MODEL").unwrap(), "model-e");
+    assert_eq!(profile.get("CLAUDE_CODE_EFFORT_LEVEL").unwrap(), "high");
+    // 真正可选的 WINDOW 不注入
+    assert!(profile.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW").is_none());
+}
+
+#[test]
 fn test_cli_delete_claude_rejected() {
     let _store = setup_store();
     let dir = setup_project(r#"{"env":{}}"#);
