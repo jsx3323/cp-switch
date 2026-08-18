@@ -64,6 +64,8 @@ tests/
 
 先清除 `env` 中所有 `ANTHROPIC_*` key，再写入 profile 的 key。非 ANTHROPIC_* env 和 permissions 不受影响。项目无 `settings.local.json` 时自动创建。
 
+`use claude`（内置名）只清不写：清空受管 key 后若 `env` 变空则连字段一起删除，原本没有 `env` 时也不会造出 `"env": {}`。`.claude` 目录缺失时与普通 profile 一样先确认再创建。
+
 ## model 行为
 
 `cp-switch model [value] [--clear] [--user]` 操作 settings 顶层 `model` 字段（CC 原生模型选择器，区别于 `env.ANTHROPIC_MODEL`）。
