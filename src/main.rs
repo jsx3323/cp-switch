@@ -16,6 +16,7 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<(), CsError> {
+    cli.command.validate()?;
     match cli.command {
         Commands::List { user } => command::list::run(&Scope::from_flag(user)?),
         Commands::Use { name, user } => command::use_profile::run(&name, &Scope::from_flag(user)?),

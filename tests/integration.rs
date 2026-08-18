@@ -694,6 +694,42 @@ fn test_cli_diff_in_bare_project_no_prompt() {
 }
 
 #[test]
+fn test_cli_diff_invalid_name_rejected_at_boundary() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 名字校验统一在 CLI 边界，diff 也不再漏掉
+    let (ok, _, stderr) = run_cli("diff bad!name", dir.path());
+    assert!(!ok);
+    assert!(stderr.contains("Invalid profile name"), "stderr: {}", stderr);
+    assert_eq!(exit_code("diff bad!name", dir.path()), 5);
+
+    // use claude 不受影响：内置名是合法的引用目标
+    let (ok, _, stderr) = run_cli_stdin("use claude", "y\n", dir.path());
+    assert!(ok, "use claude failed: {}", stderr);
+}
+
+#[test]
+fn test_cli_boundary_validation_covers_all_name_commands() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 五个带 name 的子命令都在边界被拦下，错误一致
+    for args in ["add bad!name", "edit bad!name", "delete bad!name", "use bad!name", "diff bad!name"] {
+        let (ok, _, stderr) = run_cli(args, dir.path());
+        assert!(!ok, "{} 应当失败", args);
+        assert!(stderr.contains("Invalid profile name"), "{} → {}", args, stderr);
+    }
+
+    // 保留名只被写类命令拒绝，引用类命令放行
+    for args in ["add claude", "edit claude", "delete claude"] {
+        let (ok, _, stderr) = run_cli(args, dir.path());
+        assert!(!ok, "{} 应当失败", args);
+        assert!(stderr.contains("is reserved"), "{} → {}", args, stderr);
+    }
+}
+
+#[test]
 fn test_cli_diff_identical_no_changes() {
     let _store = setup_store();
     let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_MODEL":"x"}}"#);

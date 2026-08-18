@@ -1,14 +1,11 @@
 use std::path::Path;
 
-use crate::cli::validate_profile_arg;
 use crate::error::CsError;
 use crate::input;
 use crate::output;
 use crate::store::{delete_profile_and_clear, read_currents};
 
 pub fn run(name: &str, force: bool, project: &Path) -> Result<(), CsError> {
-    validate_profile_arg(name)?;
-
     // delete 同时影响两个层级，一次读取取回两边的活跃标记
     let (project_current, user_current) = read_currents(project)?;
     let is_project_active = project_current.as_deref() == Some(name);
