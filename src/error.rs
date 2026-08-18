@@ -17,6 +17,8 @@ pub enum CsError {
     #[error("Invalid profile name '{name}'. Use only letters, digits, hyphens, and underscores.")]
     InvalidProfileName { name: String },
 
+    #[error("Profile name '{name}' is reserved by cp-switch.")]
+    ReservedProfileName { name: String },
 
     #[error("I/O error at {path}: {source}")]
     Io {
@@ -58,7 +60,8 @@ impl CsError {
             CsError::ProfileNotFound { .. } => 1,
             CsError::ProfileExists { .. } => 2,
             CsError::NoActiveProfile => 4,
-            CsError::InvalidProfileName { .. } => 5,
+            // 与 InvalidProfileName 同码：对调用方都是「这个名字不能用」，不为文案细分新增契约
+            CsError::InvalidProfileName { .. } | CsError::ReservedProfileName { .. } => 5,
             CsError::Io { .. } => 6,
             CsError::Json { .. } => 7,
             CsError::MalformedJson { .. } => 8,
@@ -80,6 +83,9 @@ impl CsError {
             }
             CsError::NoClaudeDir => {
                 Some("需要新建 .claude/settings.local.json 才能使用此命令".into())
+            }
+            CsError::ReservedProfileName { .. } => {
+                Some("'claude' 是内置的官方直连配置，无需创建；直接运行 'cp-switch use claude'".into())
             }
             CsError::ModelRequiresClaude => {
                 Some("先运行 'cp-switch use claude' 切换到官方直连，再设置 model".into())

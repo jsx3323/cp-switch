@@ -95,7 +95,7 @@ pub fn validate_name(name: &str) -> Result<(), CsError> {
 
 pub fn ensure_not_reserved(name: &str) -> Result<(), CsError> {
     if is_builtin(name) {
-        return Err(CsError::InvalidProfileName { name: name.into() });
+        return Err(CsError::ReservedProfileName { name: name.into() });
     }
     Ok(())
 }

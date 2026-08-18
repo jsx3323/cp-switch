@@ -66,6 +66,22 @@ fn spawn_cli(
      String::from_utf8_lossy(&output.stderr).to_string())
 }
 
+/// 子进程的原始退出码，用于断言 CsError::exit_code 的对外契约
+fn exit_code(args: &str, project: &std::path::Path) -> i32 {
+    let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
+    Command::new(&bin)
+        .args(args.split_whitespace())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .env("CP_SWITCH_DIR", store_dir_val())
+        .current_dir(project)
+        .status()
+        .unwrap()
+        .code()
+        .unwrap()
+}
+
 fn run_cli(args: &str, project: &std::path::Path) -> (bool, String, String) {
     spawn_cli(args, "", Some(project), None)
 }
@@ -1400,7 +1416,27 @@ fn test_cli_add_claude_rejected() {
     let dir = setup_project(r#"{"env":{}}"#);
     let (ok, _, stderr) = run_cli("add claude", dir.path());
     assert!(!ok);
-    assert!(stderr.contains("Invalid profile name"));
+    // 拒绝理由是「保留名」，不是「名字里有非法字符」
+    assert!(stderr.contains("is reserved"), "stderr: {}", stderr);
+    assert!(!stderr.contains("Invalid profile name"));
+    assert!(stderr.contains("cp-switch use claude"));
+}
+
+#[test]
+fn test_reserved_and_invalid_name_share_exit_code() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    // 对脚本而言两者是同一类「名字不能用」，退出码保持一致
+    let reserved = spawn_cli("add claude", "", Some(dir.path()), None);
+    let invalid = spawn_cli("add bad!name", "", Some(dir.path()), None);
+    assert!(!reserved.0 && !invalid.0);
+    assert_eq!(exit_code("add claude", dir.path()), 5);
+    assert_eq!(exit_code("add bad!name", dir.path()), 5);
+
+    // claude 本身是合法名字，只是被 cp-switch 占用
+    assert!(cp_switch::cli::validate_name("claude").is_ok());
+    assert!(cp_switch::cli::ensure_not_reserved("claude").is_err());
 }
 
 #[test]
@@ -1443,7 +1479,8 @@ fn test_cli_delete_claude_rejected() {
     let dir = setup_project(r#"{"env":{}}"#);
     let (ok, _, stderr) = run_cli("delete claude", dir.path());
     assert!(!ok);
-    assert!(stderr.contains("Invalid profile name"));
+    assert!(stderr.contains("is reserved"), "stderr: {}", stderr);
+    assert!(!stderr.contains("Invalid profile name"));
 }
 
 #[test]
@@ -1601,7 +1638,8 @@ fn test_cli_edit_claude_rejected() {
     let dir = setup_project(r#"{"env":{}}"#);
     let (ok, _, stderr) = run_cli("edit claude", dir.path());
     assert!(!ok);
-    assert!(stderr.contains("Invalid profile name"));
+    assert!(stderr.contains("is reserved"), "stderr: {}", stderr);
+    assert!(!stderr.contains("Invalid profile name"));
 }
 
 #[test]
