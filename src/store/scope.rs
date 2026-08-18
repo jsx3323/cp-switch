@@ -25,7 +25,8 @@ pub struct Listing {
 }
 
 impl Scope {
-    /// `--user` 标记到作用域的唯一转换点，也是 `find_project_dir` 的唯一调用点
+    /// `--user` 标记到作用域的唯一转换点。delete 同时清理两级活跃标记、不经 Scope，
+    /// 它在 main 里另有一处 `find_project_dir`；除此以外项目目录都由这里取得。
     pub fn from_flag(user: bool) -> Result<Scope, CsError> {
         if user {
             Ok(Scope::User)
