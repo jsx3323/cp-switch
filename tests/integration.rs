@@ -677,6 +677,23 @@ fn test_cli_diff_shows_additions_and_deletions() {
 }
 
 #[test]
+fn test_cli_diff_in_bare_project_no_prompt() {
+    let _store = setup_store();
+    let dir = setup_bare_project();
+    cp_switch::store::save_profile("bare", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://bare", "ANTHROPIC_MODEL": "m-bare"
+    })).unwrap();
+
+    // 只读命令：没有 .claude 也直接按空 env 比较，不提示、不创建
+    let (ok, stdout, stderr) = run_cli("diff bare", dir.path());
+    assert!(ok, "diff failed: {}", stderr);
+    assert!(!combined_output(&stdout, &stderr).contains("没有 .claude 目录"));
+    assert!(stdout.contains("+++ profile: bare"));
+    assert!(stdout.contains("ANTHROPIC_BASE_URL"));
+    assert!(!dir.path().join(".claude").exists());
+}
+
+#[test]
 fn test_cli_diff_identical_no_changes() {
     let _store = setup_store();
     let dir = setup_project(r#"{"env":{"ANTHROPIC_BASE_URL":"https://a","ANTHROPIC_MODEL":"x"}}"#);

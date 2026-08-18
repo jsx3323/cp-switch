@@ -28,7 +28,7 @@ src/
     list.rs       — 列出 profiles + 活跃标记（ListStatus::Active/Outdated/Missing/Inactive）
     current.rs    — 显示当前 profile
     delete.rs     — 删除 profile（活跃时需确认，同时清理两级活跃标记）
-    diff.rs       — 当前 env 与 profile 的文本 diff（含 .claude 目录检查）
+    diff.rs       — 当前 env 与 profile 的文本 diff（只读，settings 缺失按空 env 比较）
     edit.rs       — 编辑已有 profile（保留非标准 key）
     model.rs      — 设置/查看顶层 model 字段（门控：仅当前 profile 为 claude 时可用）
 tests/
@@ -73,6 +73,9 @@ tests/
 `.claude` 目录缺失时与普通 profile 一样先确认再创建。
 
 profile 不存在时先报 `ProfileNotFound`，不会为一个不存在的 profile 去问「是否新建 .claude」。
+
+`.claude` 确认只属于会写文件的 `use`。`diff` 是只读命令，`.claude` 或 settings 缺失时
+直接按空 env 比较——它本来也不会创建这个文件，为它征求同意是错的。
 
 ## model 行为
 

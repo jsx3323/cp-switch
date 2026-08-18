@@ -1,11 +1,10 @@
-use super::ensure_claude_dir;
 use crate::error::{CsError, serialization_err};
 use crate::output;
 use crate::store::{Scope, read_profile};
 
 pub fn run(name: &str, scope: &Scope) -> Result<(), CsError> {
     let profile_env = read_profile(name)?;
-    ensure_claude_dir(scope)?;
+    // 只读命令：settings 缺失时按空 env 比较，不去问用户要不要新建它不会创建的文件
     let current_env = scope.read_current_env()?;
 
     let label = match scope {
