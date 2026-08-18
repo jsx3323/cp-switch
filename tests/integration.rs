@@ -13,49 +13,52 @@ fn store_dir_val() -> String {
     std::env::var("CP_SWITCH_DIR").unwrap_or_default()
 }
 
-fn setup_project(settings_json: &str) -> TempDir {
+/// 连 .claude 目录都不存在的裸项目
+fn setup_bare_project() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
-    let claude_dir = dir.path().join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(claude_dir.join("settings.local.json"), settings_json).unwrap();
+    assert!(!dir.path().join(".claude").exists());
     dir
 }
 
+fn setup_project(settings_json: &str) -> TempDir {
+    let dir = setup_project_no_settings();
+    fs::write(dir.path().join(".claude/settings.local.json"), settings_json).unwrap();
+    dir
+}
+
+fn read_json(path: impl AsRef<std::path::Path>) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
 fn read_settings(project: &std::path::Path) -> serde_json::Value {
-    let path = project.join(".claude/settings.local.json");
-    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap()
+    read_json(project.join(".claude/settings.local.json"))
 }
 
 fn get_env_obj(settings: &serde_json::Value) -> &serde_json::Map<String, serde_json::Value> {
     settings.get("env").unwrap().as_object().unwrap()
 }
 
-fn run_cli(args: &str, project: &std::path::Path) -> (bool, String, String) {
+/// 唯一的子进程入口：cwd 用于项目级命令，home 用于 --user 命令
+fn spawn_cli(
+    args: &str,
+    input: &str,
+    cwd: Option<&std::path::Path>,
+    home: Option<&std::path::Path>,
+) -> (bool, String, String) {
     let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
-    let output = Command::new(&bin)
-        .args(args.split_whitespace())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .env("CP_SWITCH_DIR", store_dir_val())
-        .current_dir(project)
-        .output()
-        .unwrap();
-    (output.status.success(),
-     String::from_utf8_lossy(&output.stdout).to_string(),
-     String::from_utf8_lossy(&output.stderr).to_string())
-}
-
-fn run_cli_stdin(args: &str, input: &str, project: &std::path::Path) -> (bool, String, String) {
-    let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
-    let mut child = Command::new(&bin)
-        .args(args.split_whitespace())
+    let mut cmd = Command::new(&bin);
+    cmd.args(args.split_whitespace())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .env("CP_SWITCH_DIR", store_dir_val())
-        .current_dir(project)
-        .spawn()
-        .unwrap();
+        .env("CP_SWITCH_DIR", store_dir_val());
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    if let Some(dir) = home {
+        cmd.env("HOME", dir);
+    }
+    let mut child = cmd.spawn().unwrap();
     child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
     let output = child.wait_with_output().unwrap();
     (output.status.success(),
@@ -63,8 +66,17 @@ fn run_cli_stdin(args: &str, input: &str, project: &std::path::Path) -> (bool, S
      String::from_utf8_lossy(&output.stderr).to_string())
 }
 
+fn run_cli(args: &str, project: &std::path::Path) -> (bool, String, String) {
+    spawn_cli(args, "", Some(project), None)
+}
+
+fn run_cli_stdin(args: &str, input: &str, project: &std::path::Path) -> (bool, String, String) {
+    spawn_cli(args, input, Some(project), None)
+}
+
+/// 有 .claude 目录但没有 settings.local.json
 fn setup_project_no_settings() -> TempDir {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = setup_bare_project();
     fs::create_dir_all(dir.path().join(".claude")).unwrap();
     dir
 }
@@ -86,26 +98,18 @@ fn setup_home() -> TempDir {
 }
 
 fn read_user_settings(home: &std::path::Path) -> serde_json::Value {
-    let path = home.join(".claude/settings.json");
-    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap()
+    read_json(home.join(".claude/settings.json"))
+}
+
+/// 预置用户级 settings.json
+fn setup_user_settings(home: &std::path::Path, settings_json: &str) {
+    let claude_dir = home.join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(claude_dir.join("settings.json"), settings_json).unwrap();
 }
 
 fn run_cli_user(args: &str, input: &str, home: &std::path::Path) -> (bool, String, String) {
-    let bin = std::env::var("CARGO_BIN_EXE_cp-switch").unwrap();
-    let mut child = Command::new(&bin)
-        .args(args.split_whitespace())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .env("CP_SWITCH_DIR", store_dir_val())
-        .env("HOME", home)
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
-    let output = child.wait_with_output().unwrap();
-    (output.status.success(),
-     String::from_utf8_lossy(&output.stdout).to_string(),
-     String::from_utf8_lossy(&output.stderr).to_string())
+    spawn_cli(args, input, None, Some(home))
 }
 
 // ============================================================
@@ -723,8 +727,7 @@ fn test_cli_add_empty_required_retries() {
 fn test_cli_use_creates_settings_in_brand_new_project() {
     let _store = setup_store();
     // 完全新项目：连 .claude 目录都不存在，需要确认新建
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".claude").exists());
+    let dir = setup_bare_project();
 
     cp_switch::store::save_profile("brandnew", &serde_json::json!({
         "ANTHROPIC_BASE_URL": "https://new", "ANTHROPIC_API_KEY": "sk-new", "ANTHROPIC_MODEL": "new"
@@ -749,8 +752,7 @@ fn test_cli_use_creates_settings_in_brand_new_project() {
 fn test_cli_use_reject_create_no_claude_dir() {
     let _store = setup_store();
     // 完全新项目：拒绝新建 .claude 目录应报错退出
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".claude").exists());
+    let dir = setup_bare_project();
 
     cp_switch::store::save_profile("reject", &serde_json::json!({
         "ANTHROPIC_BASE_URL": "https://r", "ANTHROPIC_API_KEY": "sk-r"
@@ -928,10 +930,7 @@ fn test_cli_delete_nonactive_no_force() {
 fn test_cli_use_corrupted_settings() {
     let _store = setup_store();
     // settings.local.json 存在但内容是非法 JSON
-    let dir = tempfile::tempdir().unwrap();
-    let claude_dir = dir.path().join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(claude_dir.join("settings.local.json"), "{invalid json!!!}").unwrap();
+    let dir = setup_project("{invalid json!!!}");
 
     cp_switch::store::save_profile("test", &serde_json::json!({
         "ANTHROPIC_BASE_URL": "https://a", "ANTHROPIC_API_KEY": "sk-a", "ANTHROPIC_MODEL": "a"
@@ -961,10 +960,7 @@ fn test_write_settings_creates_backup() {
     // 备份文件应存在且内容与原始一致
     let bak_path = dir.path().join(".claude/settings.local.json.bak");
     assert!(bak_path.exists());
-    let bak_content: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(&bak_path).unwrap()
-    ).unwrap();
-    assert_eq!(bak_content, original);
+    assert_eq!(read_json(&bak_path), original);
 }
 
 #[test]
@@ -1010,12 +1006,12 @@ fn test_write_settings_backup_overwrites_on_successive_use() {
     // 第一次 use：备份应为原始内容
     run_cli("use a", dir.path());
     let bak_path = dir.path().join(".claude/settings.local.json.bak");
-    let bak1: serde_json::Value = serde_json::from_str(&fs::read_to_string(&bak_path).unwrap()).unwrap();
+    let bak1 = read_json(&bak_path);
     assert_eq!(bak1.get("env").unwrap().get("ANTHROPIC_BASE_URL").unwrap(), "https://original");
 
     // 第二次 use：备份应为 use a 后的内容，不是原始内容
     run_cli("use b", dir.path());
-    let bak2: serde_json::Value = serde_json::from_str(&fs::read_to_string(&bak_path).unwrap()).unwrap();
+    let bak2 = read_json(&bak_path);
     assert_eq!(bak2.get("env").unwrap().get("ANTHROPIC_BASE_URL").unwrap(), "https://a");
 }
 
@@ -1059,8 +1055,7 @@ fn test_state_migration_from_old_format() {
     assert!(!store_dir.join("current").exists());
 
     // state.json 内容正确
-    let state_content: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    let state_content = read_json(&state_path);
     let profiles_obj = state_content.get("profiles").unwrap().as_object().unwrap();
     assert_eq!(profiles_obj.len(), 2);
     assert_eq!(
@@ -1102,8 +1097,7 @@ fn test_state_json_fresh_creates_default() {
     assert!(state_path.exists());
 
     // 内容是合法的空 state（空 map 被 skip_serializing_if 跳过）
-    let state_content: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    let state_content = read_json(&state_path);
     assert!(state_content.get("profiles").is_none());
     assert!(state_content.get("project_currents").is_none());
     assert!(state_content.get("user_current").is_none());
@@ -1295,9 +1289,7 @@ fn test_cli_use_user_preserves_permissions() {
     let home_path = home.path().to_path_buf();
 
     // 先创建 ~/home/.claude/settings.json 带 permissions
-    let claude_dir = home_path.join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(claude_dir.join("settings.json"), r#"{"permissions":{"allow":["Bash(ls)"]},"env":{"ANTHROPIC_MODEL":"old"}}"#).unwrap();
+    setup_user_settings(&home_path, r#"{"permissions":{"allow":["Bash(ls)"]},"env":{"ANTHROPIC_MODEL":"old"}}"#);
 
     cp_switch::store::save_profile("perm-test", &serde_json::json!({
         "ANTHROPIC_BASE_URL": "https://p", "ANTHROPIC_API_KEY": "sk-p", "ANTHROPIC_MODEL": "p"
@@ -1452,8 +1444,7 @@ fn test_cli_use_claude_clears_env() {
 #[test]
 fn test_cli_use_claude_reject_create_no_claude_dir() {
     let _store = setup_store();
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".claude").exists());
+    let dir = setup_bare_project();
 
     // 拒绝后不应建出 .claude，也不应把该目录登记进 project_currents
     let (ok, _stdout, stderr) = run_cli_stdin("use claude", "n\n", dir.path());
@@ -1470,9 +1461,7 @@ fn test_cli_use_claude_user() {
     let home_path = home.path().to_path_buf();
 
     // 预设用户 settings
-    let claude_dir = home_path.join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(claude_dir.join("settings.json"), r#"{"permissions":{"allow":["Bash"]},"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old","OTHER":"keep"}}"#).unwrap();
+    setup_user_settings(&home_path, r#"{"permissions":{"allow":["Bash"]},"env":{"ANTHROPIC_BASE_URL":"https://old","ANTHROPIC_API_KEY":"sk-old","ANTHROPIC_MODEL":"old","OTHER":"keep"}}"#);
 
     let (ok, stdout, stderr) = run_cli_user("use --user claude", "", &home_path);
     assert!(ok, "use --user claude failed: {}", stderr);
@@ -1524,8 +1513,7 @@ fn test_cli_use_claude_then_switch_back() {
 fn test_cli_use_claude_on_clean_project() {
     let _store = setup_store();
     // 新项目连 .claude 目录都没有
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".claude").exists());
+    let dir = setup_bare_project();
 
     // use claude 同样需要确认创建 .claude
     let (ok, stdout, stderr) = run_cli_stdin("use claude", "y\n", dir.path());
