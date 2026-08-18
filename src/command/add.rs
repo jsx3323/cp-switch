@@ -1,14 +1,13 @@
-use crate::cli::{validate_name, ensure_not_reserved};
+use crate::cli::validate_profile_arg;
 use crate::command::prompt::prompt_profile_env;
 use crate::error::CsError;
 use crate::output;
-use crate::store::{save_profile, list_profiles};
+use crate::store::{profile_exists, save_profile};
 
 pub fn run(name: &str, force: bool) -> Result<(), CsError> {
-    validate_name(name)?;
-    ensure_not_reserved(name)?;
+    validate_profile_arg(name)?;
 
-    let existed = list_profiles()?.contains(&name.to_string());
+    let existed = profile_exists(name)?;
     if !force && existed {
         return Err(CsError::ProfileExists { name: name.into() });
     }

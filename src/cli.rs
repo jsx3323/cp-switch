@@ -99,3 +99,9 @@ pub fn ensure_not_reserved(name: &str) -> Result<(), CsError> {
     }
     Ok(())
 }
+
+/// add / edit / delete 接受的 profile 名：既要合法，也不能占用内置名
+pub fn validate_profile_arg(name: &str) -> Result<(), CsError> {
+    validate_name(name)?;
+    ensure_not_reserved(name)
+}

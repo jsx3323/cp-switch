@@ -1,17 +1,17 @@
-use std::path::{Path, PathBuf};
 use std::env;
+use std::path::{Path, PathBuf};
 
 use crate::error::{CsError, io_err};
 
+fn home_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+}
+
 pub(crate) fn store_dir() -> PathBuf {
-    std::env::var("CP_SWITCH_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("/"))
-                .join(".cp-switch")
-        })
+    match env::var("CP_SWITCH_DIR") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => home_dir().join(".cp-switch"),
+    }
 }
 
 pub(crate) fn state_path() -> PathBuf {
@@ -31,8 +31,5 @@ pub fn has_claude_dir(project: &Path) -> bool {
 }
 
 pub fn user_settings_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("/"))
-        .join(".claude")
-        .join("settings.json")
+    home_dir().join(".claude").join("settings.json")
 }

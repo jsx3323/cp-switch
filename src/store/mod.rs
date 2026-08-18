@@ -1,19 +1,20 @@
-pub mod keys;
-pub mod path;
 pub mod io;
+pub mod keys;
 pub mod merge;
+pub mod path;
+pub mod scope;
 pub mod state;
 
-pub use keys::{KEY_BASE_URL, KEY_API_KEY, KEY_AUTH_TOKEN, KEY_MODEL, KEY_SMALL_FAST_MODEL,
-               KEY_DEFAULT_HAIKU, KEY_DEFAULT_SONNET, KEY_DEFAULT_OPUS,
-               KEY_SUBAGENT_MODEL, KEY_EFFORT_LEVEL, KEY_AUTO_COMPACT_WINDOW,
-               CLAUDE_PROFILE_NAME, MODEL_FIELD,
-               is_claude_env_key, is_builtin, derive_default_models};
+pub use keys::{KEY_AUTH_TOKEN, KEY_AUTO_COMPACT_WINDOW, KEY_BASE_URL, KEY_EFFORT_LEVEL,
+               KEY_MODEL, KEY_SMALL_FAST_MODEL, KEY_SUBAGENT_MODEL,
+               CLAUDE_PROFILE_NAME, ENV_FIELD, MODEL_FIELD,
+               derive_default_models, is_builtin, is_claude_env_key};
 pub use path::{find_project_dir, has_claude_dir};
-pub use io::{list_profiles, read_current, write_current, clear_current,
-             read_profile, save_profile, delete_profile, read_current_env,
+pub use io::{list_profiles, profile_exists, read_profile, save_profile,
+             delete_profile, delete_profile_and_clear,
+             read_current, read_currents, write_current, clear_current, read_current_env,
+             read_user_current, write_user_current, clear_user_current, read_user_current_env,
              read_settings_local, write_settings_local,
-             read_user_settings, write_user_settings,
-             read_user_current, write_user_current, clear_user_current,
-             read_user_current_env};
-pub use merge::{merge_env, clear_env, set_model, clear_model};
+             read_user_settings, write_user_settings};
+pub use merge::{clear_env, clear_model, get_model, is_env_applied, managed_env, merge_env, set_model};
+pub use scope::{Listing, Scope};

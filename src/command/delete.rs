@@ -1,23 +1,20 @@
 use std::path::Path;
 
-use crate::cli::{validate_name, ensure_not_reserved};
+use crate::cli::validate_profile_arg;
 use crate::error::CsError;
 use crate::input;
 use crate::output;
-use crate::store::{delete_profile, read_current, clear_current,
-                   read_user_current, clear_user_current};
+use crate::store::{delete_profile_and_clear, read_currents};
 
 pub fn run(name: &str, force: bool, project: &Path) -> Result<(), CsError> {
-    validate_name(name)?;
-    ensure_not_reserved(name)?;
-    let project_current = read_current(project)?;
-    let user_current = read_user_current()?;
+    validate_profile_arg(name)?;
 
+    // delete 同时影响两个层级，一次读取取回两边的活跃标记
+    let (project_current, user_current) = read_currents(project)?;
     let is_project_active = project_current.as_deref() == Some(name);
     let is_user_active = user_current.as_deref() == Some(name);
-    let is_active = is_project_active || is_user_active;
 
-    if is_active && !force {
+    if (is_project_active || is_user_active) && !force {
         output::info(&format!("Profile '{}' is currently active.", name));
         output::info("Deleting will remove the profile but leave current settings unchanged.");
         if !input::prompt_confirm("Continue?")? {
@@ -26,14 +23,11 @@ pub fn run(name: &str, force: bool, project: &Path) -> Result<(), CsError> {
         }
     }
 
-    delete_profile(name)?;
-
-    if is_project_active {
-        clear_current(project)?;
-    }
-    if is_user_active {
-        clear_user_current()?;
-    }
+    delete_profile_and_clear(
+        name,
+        if is_project_active { Some(project) } else { None },
+        is_user_active,
+    )?;
 
     match (is_project_active, is_user_active) {
         (true, true) => output::success(&format!(

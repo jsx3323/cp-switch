@@ -1,4 +1,6 @@
 use colored::Colorize;
+use serde_json::Value;
+use similar::{ChangeTag, TextDiff};
 
 pub fn success(msg: &str) {
     println!("{}", msg.green().bold());
@@ -18,6 +20,10 @@ pub fn info(msg: &str) {
 
 pub fn warn(msg: &str) {
     eprintln!("{}", format!("Warning: {}", msg).yellow());
+}
+
+pub fn written(key: &str, value: &Value) {
+    println!("  {} = {}", key, value);
 }
 
 pub fn removed(key: &str) {
@@ -43,31 +49,23 @@ impl ListStatus {
 }
 
 pub fn list_item(name: &str, status: &ListStatus) {
-    let prefix = match status {
-        ListStatus::Inactive => "  ",
-        _ => "  *",
-    };
-    let suffix = status.suffix();
-    if suffix.is_empty() {
-        println!("{}  {}", prefix, name);
-    } else {
-        println!("{} {} {}", prefix.green().bold(), name.bold(), suffix);
+    match status {
+        ListStatus::Inactive => println!("    {}", name),
+        _ => println!("{} {} {}", "  *".green().bold(), name.bold(), status.suffix()),
     }
 }
 
-pub fn diff_header(current_label: &str, profile_label: &str) {
+/// 逐行渲染两段文本的差异
+pub fn render_diff(current_label: &str, profile_label: &str, current: &str, profile: &str) {
     println!("--- {}", current_label);
     println!("+++ {}", profile_label);
-}
 
-pub fn diff_deleted(line: &str) {
-    println!("-{}", line.red());
-}
-
-pub fn diff_inserted(line: &str) {
-    println!("+{}", line.green());
-}
-
-pub fn diff_equal(line: &str) {
-    println!(" {}", line);
+    for change in TextDiff::from_lines(current, profile).iter_all_changes() {
+        let line = change.to_string_lossy();
+        match change.tag() {
+            ChangeTag::Delete => println!("-{}", line.red()),
+            ChangeTag::Insert => println!("+{}", line.green()),
+            ChangeTag::Equal => println!(" {}", line),
+        }
+    }
 }
