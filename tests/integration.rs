@@ -59,7 +59,9 @@ fn spawn_cli(
         cmd.env("HOME", dir);
     }
     let mut child = cmd.spawn().unwrap();
-    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+    // 子进程可能在读 stdin 前就报错退出（如 ProfileExists），此时写入拿到 EPIPE：
+    // 那是被测行为的正常结果，不该让辅助函数 panic
+    let _ = child.stdin.take().unwrap().write_all(input.as_bytes());
     let output = child.wait_with_output().unwrap();
     (output.status.success(),
      String::from_utf8_lossy(&output.stdout).to_string(),
