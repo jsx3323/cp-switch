@@ -13,8 +13,6 @@ pub use path::{find_project_dir, has_claude_dir};
 pub use io::{list_profiles, profile_exists, read_profile, save_profile,
              delete_profile, delete_profile_and_clear,
              read_current, read_currents, write_current, clear_current, read_current_env,
-             read_user_current, write_user_current, clear_user_current, read_user_current_env,
-             read_settings_local, write_settings_local,
-             read_user_settings, write_user_settings};
+             read_user_current};
 pub use merge::{clear_env, clear_model, get_model, is_env_applied, managed_env, merge_env, set_model};
 pub use scope::{Listing, Scope};

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::merge::managed_env;
-use super::path::{settings_local_path, state_path, user_settings_path};
+use super::path::{settings_local_path, state_path};
 use super::state::State;
 use crate::error::{CsError, io_err, json_err, serialization_err};
 
@@ -177,14 +177,6 @@ pub fn read_user_current() -> Result<Option<String>, CsError> {
     Ok(read_state()?.user_current)
 }
 
-pub fn write_user_current(name: &str) -> Result<(), CsError> {
-    update_state(|state| state.user_current = Some(name.to_string()))
-}
-
-pub fn clear_user_current() -> Result<(), CsError> {
-    update_state(|state| state.user_current = None)
-}
-
 // ── settings 读写（项目级与用户级共用同一套逻辑）──
 
 fn default_settings() -> Value {
@@ -212,26 +204,6 @@ pub(crate) fn write_settings_file(path: &Path, content: &Value) -> Result<(), Cs
     atomic_write(path, &json)
 }
 
-pub fn read_settings_local(project: &Path) -> Result<Value, CsError> {
-    read_settings_file(&settings_local_path(project))
-}
-
-pub fn write_settings_local(project: &Path, content: &Value) -> Result<(), CsError> {
-    write_settings_file(&settings_local_path(project), content)
-}
-
-pub fn read_user_settings() -> Result<Value, CsError> {
-    read_settings_file(&user_settings_path())
-}
-
-pub fn write_user_settings(content: &Value) -> Result<(), CsError> {
-    write_settings_file(&user_settings_path(), content)
-}
-
 pub fn read_current_env(project: &Path) -> Result<Value, CsError> {
-    managed_env(&read_settings_local(project)?)
-}
-
-pub fn read_user_current_env() -> Result<Value, CsError> {
-    managed_env(&read_user_settings()?)
+    managed_env(&read_settings_file(&settings_local_path(project))?)
 }
