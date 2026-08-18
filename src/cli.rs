@@ -73,6 +73,18 @@ pub enum Commands {
         name: String,
     },
 
+    /// 复制已有配置为新名称
+    #[command(visible_aliases = ["cp"])]
+    Copy {
+        /// 源配置名称
+        src: String,
+        /// 新配置名称
+        dst: String,
+        /// 覆盖已存在的目标配置
+        #[arg(long, short)]
+        force: bool,
+    },
+
     /// 设置/查看本地使用的 Claude 模型（仅在当前 profile 为 claude 时可用）
     Model {
         /// 模型 id（如 claude-fable-5[1m]）；省略则显示当前值
@@ -94,6 +106,9 @@ impl Commands {
             // 会写 profile：保留名必须拒绝
             Commands::Add { name, .. } | Commands::Edit { name } | Commands::Delete { name, .. } => {
                 validate_profile_arg(name)
+            }
+            Commands::Copy { src, dst, .. } => {
+                validate_profile_arg(src).and_then(|_| validate_profile_arg(dst))
             }
             // 只是引用 profile：内置 claude 是合法目标
             Commands::Use { name, .. } | Commands::Diff { name, .. } => validate_name(name),

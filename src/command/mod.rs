@@ -1,4 +1,5 @@
 pub mod add;
+pub mod copy;
 pub mod current;
 pub mod delete;
 pub mod diff;

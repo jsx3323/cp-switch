@@ -120,6 +120,22 @@ pub fn save_profile(name: &str, content: &Value) -> Result<(), CsError> {
     })
 }
 
+/// 复制 profile（单次读单次写）。返回 dst 是否已存在——即这次是覆盖而非新建。
+pub fn copy_profile(src: &str, dst: &str, force: bool) -> Result<bool, CsError> {
+    let mut state = read_state()?;
+    // 先克隆再插入：src == dst 且带 force 时不至于把源摘空
+    let Some(value) = state.profiles.get(src).cloned() else {
+        return Err(not_found(src, state));
+    };
+    let existed = state.profiles.contains_key(dst);
+    if existed && !force {
+        return Err(CsError::ProfileExists { name: dst.into() });
+    }
+    state.profiles.insert(dst.to_string(), value);
+    write_state(&state)?;
+    Ok(existed)
+}
+
 /// 删除 profile，并按需一并清理项目级 / 用户级活跃标记（单次读单次写）
 pub fn delete_profile_and_clear(
     name: &str,

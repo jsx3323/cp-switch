@@ -1910,3 +1910,78 @@ fn test_cli_model_user() {
     let settings = read_user_settings(&home_path);
     assert_eq!(settings.get("model").unwrap(), "claude-sonnet-5");
 }
+#[test]
+fn test_cli_copy_duplicates_env() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{"ANTHROPIC_MODEL":"x"}}"#);
+
+    let env = serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://src", "ANTHROPIC_AUTH_TOKEN": "sk-src",
+        "ANTHROPIC_MODEL": "src-model"
+    });
+    cp_switch::store::save_profile("copy-src", &env).unwrap();
+
+    let (ok, stdout, stderr) = run_cli("copy copy-src copy-dst", dir.path());
+    assert!(ok, "copy failed: {}", stderr);
+    assert!(combined_output(&stdout, &stderr).contains("Copied profile 'copy-src' to 'copy-dst'"));
+
+    // 两份内容完全一致，源保留
+    assert_eq!(cp_switch::store::read_profile("copy-dst").unwrap(), env);
+    assert_eq!(cp_switch::store::read_profile("copy-src").unwrap(), env);
+
+    let (_, stdout, stderr) = run_cli("list", dir.path());
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("copy-src") && out.contains("copy-dst"));
+}
+
+#[test]
+fn test_cli_copy_existing_dst_requires_force() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    cp_switch::store::save_profile("cp-a", &serde_json::json!({"ANTHROPIC_MODEL":"a"})).unwrap();
+    cp_switch::store::save_profile("cp-b", &serde_json::json!({"ANTHROPIC_MODEL":"b"})).unwrap();
+
+    assert_eq!(exit_code("copy cp-a cp-b", dir.path()), 2);
+    // 被拒绝时目标内容不变
+    assert_eq!(cp_switch::store::read_profile("cp-b").unwrap().get("ANTHROPIC_MODEL").unwrap(), "b");
+
+    let (ok, stdout, stderr) = run_cli("copy cp-a cp-b --force", dir.path());
+    assert!(ok, "forced copy failed: {}", stderr);
+    assert!(combined_output(&stdout, &stderr).contains("onto existing profile 'cp-b'"));
+    assert_eq!(cp_switch::store::read_profile("cp-b").unwrap().get("ANTHROPIC_MODEL").unwrap(), "a");
+}
+
+#[test]
+fn test_cli_copy_missing_src() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    assert_eq!(exit_code("copy ghost clone", dir.path()), 1);
+    assert!(!cp_switch::store::profile_exists("clone").unwrap());
+}
+
+#[test]
+fn test_cli_copy_claude_rejected() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    cp_switch::store::save_profile("cp-real", &serde_json::json!({"ANTHROPIC_MODEL":"r"})).unwrap();
+
+    // 内置名两个位置都不接受
+    assert_eq!(exit_code("copy claude mine", dir.path()), 5);
+    assert_eq!(exit_code("copy cp-real claude", dir.path()), 5);
+}
+
+#[test]
+fn test_cli_copy_keeps_current_marker() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{"ANTHROPIC_MODEL":"x"}}"#);
+
+    cp_switch::store::save_profile("cp-active", &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
+    run_cli("use cp-active", dir.path());
+
+    let (ok, _, stderr) = run_cli("copy cp-active cp-spare", dir.path());
+    assert!(ok, "copy failed: {}", stderr);
+
+    // copy 不动活跃标记
+    assert_eq!(read_current_canonical(dir.path()), Some("cp-active".to_string()));
+}
