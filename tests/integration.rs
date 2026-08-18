@@ -677,6 +677,19 @@ fn test_cli_diff_shows_additions_and_deletions() {
 }
 
 #[test]
+fn test_cli_model_in_bare_project_asks_before_creating() {
+    let _store = setup_store();
+    let dir = setup_bare_project();
+    // 活跃标记留在 state.json 里，.claude 却不存在：写 model 前须先确认
+    cp_switch::store::write_current(&dir.path().canonicalize().unwrap(), "claude").unwrap();
+
+    let (ok, stdout, stderr) = run_cli_stdin("model sonnet", "n\n", dir.path());
+    assert!(!ok, "拒绝后应以错误退出");
+    assert!(combined_output(&stdout, &stderr).contains("没有 .claude 目录"));
+    assert!(!dir.path().join(".claude").exists(), "拒绝后不应创建 .claude");
+}
+
+#[test]
 fn test_cli_list_active_with_non_standard_key() {
     let _store = setup_store();
     let dir = setup_project(r#"{"env":{}}"#);

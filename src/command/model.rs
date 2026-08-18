@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::scope_label;
+use super::{ensure_claude_dir, scope_label};
 use crate::error::CsError;
 use crate::output;
 use crate::store::{Scope, clear_model, get_model, is_builtin, set_model};
@@ -14,6 +14,8 @@ pub fn run(value: Option<String>, clear: bool, scope: &Scope) -> Result<(), CsEr
 
     let (settings, outcome) = apply(scope.read_settings()?, value, clear)?;
     if outcome.needs_write() {
+        // 活跃标记存在 state.json，.claude 可能已被删掉；写盘前与 use 一样先确认
+        ensure_claude_dir(scope)?;
         scope.write_settings(&settings)?;
     }
     report(&outcome, scope_label(scope));
