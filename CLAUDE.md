@@ -51,6 +51,8 @@ tests/
 - validate_name 在 cli.rs（命令层关注点），不在 store
 - merge.rs 全是纯函数（不读写文件），命令层负责 IO 编排；env 语义的判断（受管 key 过滤、
   是否已生效）也放这里，不散落到命令层
+- `is_env_applied` 比未过滤的 `settings.env`，不比 `managed_env`：`merge_env` 写入 profile
+  的全部 key，而 edit 保留非标准 key，拿过滤后的 env 去比会让这种 profile 永远显示 outdated
 - store 公共 API 通过 mod.rs 显式 re-export，内部函数 pub(crate)
 
 ## 存储
@@ -82,6 +84,8 @@ profile 不存在时先报 `ProfileNotFound`，不会为一个不存在的 profi
 `cp-switch model [value] [--clear] [--user]` 操作 settings 顶层 `model` 字段（CC 原生模型选择器，区别于 `env.ANTHROPIC_MODEL`）。
 
 门控：仅当前 profile 为内置 `claude`（官方直连）时可用——无活跃 profile 或第三方 profile 时报错 `ModelRequiresClaude` 并不改文件。理由：顶层 model 只对官方 API 有意义。无参显示当前值，`--clear` 删除该字段。与 profile 系统正交（`use` 不动 model，`model` 不动 env），value 只校验非空，具体 id 交给 CC。
+
+要写盘时（设值/清除）与 `use` 一样先过 `ensure_claude_dir`：门控只看 `state.json` 里的活跃标记，`.claude` 可能已被删掉，不能因此凭空造出 settings 文件。无参查看不写盘，也就不问。
 
 ## 测试
 
