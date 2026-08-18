@@ -1910,6 +1910,7 @@ fn test_cli_model_user() {
     let settings = read_user_settings(&home_path);
     assert_eq!(settings.get("model").unwrap(), "claude-sonnet-5");
 }
+
 #[test]
 fn test_cli_copy_duplicates_env() {
     let _store = setup_store();
@@ -2083,4 +2084,19 @@ fn test_cli_rename_missing_src_and_reserved_name() {
     assert_eq!(exit_code("rename claude mine", dir.path()), 5);
     assert_eq!(exit_code("rename mv-real claude", dir.path()), 5);
     assert!(cp_switch::store::profile_exists("mv-real").unwrap());
+}
+
+#[test]
+fn test_cli_copy_rename_same_name_rejected() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    cp_switch::store::save_profile("same", &serde_json::json!({"ANTHROPIC_MODEL":"s"})).unwrap();
+
+    // 源与目标同名：不该建议 --force，带 --force 也不该报「已改名」
+    assert_eq!(exit_code("copy same same", dir.path()), 5);
+    assert_eq!(exit_code("copy same same --force", dir.path()), 5);
+    assert_eq!(exit_code("rename same same", dir.path()), 5);
+    assert_eq!(exit_code("rename same same --force", dir.path()), 5);
+
+    assert_eq!(cp_switch::store::read_profile("same").unwrap().get("ANTHROPIC_MODEL").unwrap(), "s");
 }

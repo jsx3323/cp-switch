@@ -120,7 +120,9 @@ impl Commands {
                 validate_profile_arg(name)
             }
             Commands::Copy { src, dst, .. } | Commands::Rename { src, dst, .. } => {
-                validate_profile_arg(src).and_then(|_| validate_profile_arg(dst))
+                validate_profile_arg(src)?;
+                validate_profile_arg(dst)?;
+                ensure_distinct(src, dst)
             }
             // 只是引用 profile：内置 claude 是合法目标
             Commands::Use { name, .. } | Commands::Diff { name, .. } => validate_name(name),
@@ -139,6 +141,15 @@ pub fn validate_name(name: &str) -> Result<(), CsError> {
 pub fn ensure_not_reserved(name: &str) -> Result<(), CsError> {
     if is_builtin(name) {
         return Err(CsError::ReservedProfileName { name: name.into() });
+    }
+    Ok(())
+}
+
+/// copy / rename 的源与目标必须不同：同名时 ProfileExists 那句「用 --force 覆盖」是误导，
+/// 而带上 --force 又只是无声的空操作
+fn ensure_distinct(src: &str, dst: &str) -> Result<(), CsError> {
+    if src == dst {
+        return Err(CsError::SameProfileName { name: src.into() });
     }
     Ok(())
 }

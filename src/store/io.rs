@@ -121,7 +121,7 @@ pub fn save_profile(name: &str, content: &Value) -> Result<(), CsError> {
 }
 
 /// copy 与 rename 的唯一差别：是否摘掉源 profile 并把活跃标记迁到新名下
-pub(crate) enum Transfer {
+enum Transfer {
     Copy,
     Rename,
 }

@@ -20,6 +20,9 @@ pub enum CsError {
     #[error("Profile name '{name}' is reserved by cp-switch.")]
     ReservedProfileName { name: String },
 
+    #[error("Source and target are the same profile '{name}'.")]
+    SameProfileName { name: String },
+
     #[error("I/O error at {path}: {source}")]
     Io {
         path: String,
@@ -61,7 +64,9 @@ impl CsError {
             CsError::ProfileExists { .. } => 2,
             CsError::NoActiveProfile => 4,
             // 与 InvalidProfileName 同码：对调用方都是「这个名字不能用」，不为文案细分新增契约
-            CsError::InvalidProfileName { .. } | CsError::ReservedProfileName { .. } => 5,
+            CsError::InvalidProfileName { .. }
+            | CsError::ReservedProfileName { .. }
+            | CsError::SameProfileName { .. } => 5,
             CsError::Io { .. } => 6,
             CsError::Json { .. } => 7,
             CsError::MalformedJson { .. } => 8,
