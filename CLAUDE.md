@@ -18,7 +18,7 @@ src/
     state.rs      — State 结构（profiles / project_currents / user_current，单文件 state.json 的内存表示）
     path.rs       — 路径构造（state_path/settings_local_path/user_settings_path）+ find_project_dir
     scope.rs      — Scope 枚举（Project/User）：settings 文件与活跃标记的层级差异只在此表达一次
-    io.rs         — state.json CRUD（读写走 read_state/update_state）+ 旧文件夹格式自动迁移（try_migrate）+ settings 读写（read/write_settings_file 按路径复用）+ 原子写入（write→tmp→rename）+ settings 备份
+    io.rs         — state.json CRUD（读写走 read_state/update_state）+ copy/rename 共用的 transfer_profile + 旧文件夹格式自动迁移（try_migrate）+ settings 读写（read/write_settings_file 按路径复用）+ 原子写入（write→tmp→rename）+ settings 备份
     merge.rs      — env/model 纯函数（不读写文件）：merge_env（clear_env 是其空参特例）/managed_env/is_env_applied/get_model/set_model/clear_model
   command/
     mod.rs        — 模块导出 + 跨命令共享的 scope_label / ensure_claude_dir
@@ -28,6 +28,8 @@ src/
     list.rs       — 列出 profiles + 活跃标记（ListStatus::Active/Outdated/Missing/Inactive）
     current.rs    — 显示当前 profile
     delete.rs     — 删除 profile（活跃时需确认，同时清理两级活跃标记）
+    copy.rs       — 复制 profile（不动活跃标记）
+    rename.rs     — 改名 profile（迁移全部项目级 + 用户级活跃标记）
     diff.rs       — 当前 env 与 profile 的文本 diff（只读，settings 缺失按空 env 比较）
     edit.rs       — 编辑已有 profile（保留非标准 key）
     model.rs      — 设置/查看顶层 model 字段（门控：仅当前 profile 为 claude 时可用）
@@ -78,6 +80,20 @@ profile 不存在时先报 `ProfileNotFound`，不会为一个不存在的 profi
 
 `.claude` 确认只属于会写文件的 `use`。`diff` 是只读命令，`.claude` 或 settings 缺失时
 直接按空 env 比较——它本来也不会创建这个文件，为它征求同意是错的。
+
+## copy / rename 行为
+
+两者共用 `io::transfer_profile`（单次读单次写），差别只有 `Transfer::Copy` / `Transfer::Rename`：
+rename 摘掉源 profile，并把 `project_currents` 中全部指向旧名的条目与 `user_current` 一起改写。
+活跃标记按名字存储，不跟着改名会让指向旧名的项目全变成 `missing`。
+
+settings 只存 env 值、不存 profile 名，所以 rename 不碰 settings 文件，也不需要 `ensure_claude_dir`
+或 `--user`——改完 `is_env_applied` 仍成立，`list` 显示 `active`。
+
+目标名已存在时默认 `ProfileExists`，`--force` 覆盖；覆盖不可恢复（`state.json` 不像 settings 那样留 `.bak`）。
+源与目标同名在 cli 层就报 `SameProfileName`（与非法名同退出码 5）：走到 store 里只会得到
+「已存在，用 --force 覆盖」这种误导提示，或带 `--force` 时一句名不副实的「已改名」。
+即便如此 `transfer_profile` 仍先 `get(src).cloned()` 再 remove/insert，不依赖上层校验保证同名安全。
 
 ## model 行为
 

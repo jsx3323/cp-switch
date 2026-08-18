@@ -1910,3 +1910,193 @@ fn test_cli_model_user() {
     let settings = read_user_settings(&home_path);
     assert_eq!(settings.get("model").unwrap(), "claude-sonnet-5");
 }
+
+#[test]
+fn test_cli_copy_duplicates_env() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{"ANTHROPIC_MODEL":"x"}}"#);
+
+    let env = serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://src", "ANTHROPIC_AUTH_TOKEN": "sk-src",
+        "ANTHROPIC_MODEL": "src-model"
+    });
+    cp_switch::store::save_profile("copy-src", &env).unwrap();
+
+    let (ok, stdout, stderr) = run_cli("copy copy-src copy-dst", dir.path());
+    assert!(ok, "copy failed: {}", stderr);
+    assert!(combined_output(&stdout, &stderr).contains("Copied profile 'copy-src' to 'copy-dst'"));
+
+    // 两份内容完全一致，源保留
+    assert_eq!(cp_switch::store::read_profile("copy-dst").unwrap(), env);
+    assert_eq!(cp_switch::store::read_profile("copy-src").unwrap(), env);
+
+    let (_, stdout, stderr) = run_cli("list", dir.path());
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("copy-src") && out.contains("copy-dst"));
+}
+
+#[test]
+fn test_cli_copy_existing_dst_requires_force() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    cp_switch::store::save_profile("cp-a", &serde_json::json!({"ANTHROPIC_MODEL":"a"})).unwrap();
+    cp_switch::store::save_profile("cp-b", &serde_json::json!({"ANTHROPIC_MODEL":"b"})).unwrap();
+
+    assert_eq!(exit_code("copy cp-a cp-b", dir.path()), 2);
+    // 被拒绝时目标内容不变
+    assert_eq!(cp_switch::store::read_profile("cp-b").unwrap().get("ANTHROPIC_MODEL").unwrap(), "b");
+
+    let (ok, stdout, stderr) = run_cli("copy cp-a cp-b --force", dir.path());
+    assert!(ok, "forced copy failed: {}", stderr);
+    assert!(combined_output(&stdout, &stderr).contains("onto existing profile 'cp-b'"));
+    assert_eq!(cp_switch::store::read_profile("cp-b").unwrap().get("ANTHROPIC_MODEL").unwrap(), "a");
+}
+
+#[test]
+fn test_cli_copy_missing_src() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    assert_eq!(exit_code("copy ghost clone", dir.path()), 1);
+    assert!(!cp_switch::store::profile_exists("clone").unwrap());
+}
+
+#[test]
+fn test_cli_copy_claude_rejected() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    cp_switch::store::save_profile("cp-real", &serde_json::json!({"ANTHROPIC_MODEL":"r"})).unwrap();
+
+    // 内置名两个位置都不接受
+    assert_eq!(exit_code("copy claude mine", dir.path()), 5);
+    assert_eq!(exit_code("copy cp-real claude", dir.path()), 5);
+}
+
+#[test]
+fn test_cli_copy_keeps_current_marker() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{"ANTHROPIC_MODEL":"x"}}"#);
+
+    cp_switch::store::save_profile("cp-active", &serde_json::json!({"ANTHROPIC_MODEL":"x"})).unwrap();
+    run_cli("use cp-active", dir.path());
+
+    let (ok, _, stderr) = run_cli("copy cp-active cp-spare", dir.path());
+    assert!(ok, "copy failed: {}", stderr);
+
+    // copy 不动活跃标记
+    assert_eq!(read_current_canonical(dir.path()), Some("cp-active".to_string()));
+}
+
+#[test]
+fn test_cli_rename_moves_profile() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{"ANTHROPIC_MODEL":"x"}}"#);
+
+    let env = serde_json::json!({"ANTHROPIC_BASE_URL": "https://old", "ANTHROPIC_MODEL": "m"});
+    cp_switch::store::save_profile("old-name", &env).unwrap();
+
+    let (ok, stdout, stderr) = run_cli("rename old-name new-name", dir.path());
+    assert!(ok, "rename failed: {}", stderr);
+    assert!(combined_output(&stdout, &stderr).contains("Renamed profile 'old-name' to 'new-name'"));
+
+    assert_eq!(cp_switch::store::read_profile("new-name").unwrap(), env);
+    assert!(!cp_switch::store::profile_exists("old-name").unwrap());
+}
+
+#[test]
+fn test_cli_rename_migrates_project_marker() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    cp_switch::store::save_profile("mv-active", &serde_json::json!({
+        "ANTHROPIC_BASE_URL": "https://a", "ANTHROPIC_MODEL": "a"
+    })).unwrap();
+    run_cli("use mv-active", dir.path());
+    let settings_before = fs::read_to_string(dir.path().join(".claude/settings.local.json")).unwrap();
+
+    let (ok, _, stderr) = run_cli("rename mv-active mv-renamed", dir.path());
+    assert!(ok, "rename failed: {}", stderr);
+
+    // 标记跟着改名，且 settings 一个字节都没动 —— 所以仍是 active，不是 missing/outdated
+    assert_eq!(read_current_canonical(dir.path()), Some("mv-renamed".to_string()));
+    assert_eq!(
+        fs::read_to_string(dir.path().join(".claude/settings.local.json")).unwrap(),
+        settings_before
+    );
+
+    let (_, stdout, stderr) = run_cli("list", dir.path());
+    let out = combined_output(&stdout, &stderr);
+    assert!(out.contains("mv-renamed"));
+    assert!(out.contains("(active)"), "list 应显示 active: {}", out);
+    assert!(!out.contains("missing") && !out.contains("outdated"));
+}
+
+#[test]
+fn test_cli_rename_migrates_markers_across_projects_and_user() {
+    let _store = setup_store();
+    let dir_a = setup_project(r#"{"env":{}}"#);
+    let dir_b = setup_project(r#"{"env":{}}"#);
+    let home = setup_home();
+
+    cp_switch::store::save_profile("shared", &serde_json::json!({"ANTHROPIC_MODEL": "s"})).unwrap();
+    run_cli("use shared", dir_a.path());
+    run_cli("use shared", dir_b.path());
+    run_cli_user("use --user shared", "", home.path());
+
+    let (ok, _, stderr) = run_cli("rename shared shared-2", dir_a.path());
+    assert!(ok, "rename failed: {}", stderr);
+
+    // 每个指向旧名的标记都要迁移，不只是当前项目的那个
+    assert_eq!(read_current_canonical(dir_a.path()), Some("shared-2".to_string()));
+    assert_eq!(read_current_canonical(dir_b.path()), Some("shared-2".to_string()));
+    assert_eq!(cp_switch::store::read_user_current().unwrap(), Some("shared-2".to_string()));
+}
+
+#[test]
+fn test_cli_rename_existing_dst_requires_force() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+
+    cp_switch::store::save_profile("mv-a", &serde_json::json!({"ANTHROPIC_MODEL":"a"})).unwrap();
+    cp_switch::store::save_profile("mv-b", &serde_json::json!({"ANTHROPIC_MODEL":"b"})).unwrap();
+
+    assert_eq!(exit_code("rename mv-a mv-b", dir.path()), 2);
+    // 被拒绝时两个 profile 都还在，内容不变
+    assert_eq!(cp_switch::store::read_profile("mv-a").unwrap().get("ANTHROPIC_MODEL").unwrap(), "a");
+    assert_eq!(cp_switch::store::read_profile("mv-b").unwrap().get("ANTHROPIC_MODEL").unwrap(), "b");
+
+    let (ok, stdout, stderr) = run_cli("rename mv-a mv-b --force", dir.path());
+    assert!(ok, "forced rename failed: {}", stderr);
+    assert!(combined_output(&stdout, &stderr).contains("onto existing profile 'mv-b'"));
+    assert_eq!(cp_switch::store::read_profile("mv-b").unwrap().get("ANTHROPIC_MODEL").unwrap(), "a");
+    assert!(!cp_switch::store::profile_exists("mv-a").unwrap());
+}
+
+#[test]
+fn test_cli_rename_missing_src_and_reserved_name() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    cp_switch::store::save_profile("mv-real", &serde_json::json!({"ANTHROPIC_MODEL":"r"})).unwrap();
+
+    assert_eq!(exit_code("rename ghost whatever", dir.path()), 1);
+    assert!(!cp_switch::store::profile_exists("whatever").unwrap());
+
+    assert_eq!(exit_code("rename claude mine", dir.path()), 5);
+    assert_eq!(exit_code("rename mv-real claude", dir.path()), 5);
+    assert!(cp_switch::store::profile_exists("mv-real").unwrap());
+}
+
+#[test]
+fn test_cli_copy_rename_same_name_rejected() {
+    let _store = setup_store();
+    let dir = setup_project(r#"{"env":{}}"#);
+    cp_switch::store::save_profile("same", &serde_json::json!({"ANTHROPIC_MODEL":"s"})).unwrap();
+
+    // 源与目标同名：不该建议 --force，带 --force 也不该报「已改名」
+    assert_eq!(exit_code("copy same same", dir.path()), 5);
+    assert_eq!(exit_code("copy same same --force", dir.path()), 5);
+    assert_eq!(exit_code("rename same same", dir.path()), 5);
+    assert_eq!(exit_code("rename same same --force", dir.path()), 5);
+
+    assert_eq!(cp_switch::store::read_profile("same").unwrap().get("ANTHROPIC_MODEL").unwrap(), "s");
+}

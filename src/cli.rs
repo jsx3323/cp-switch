@@ -73,6 +73,30 @@ pub enum Commands {
         name: String,
     },
 
+    /// 复制已有配置为新名称
+    #[command(visible_aliases = ["cp"])]
+    Copy {
+        /// 源配置名称
+        src: String,
+        /// 新配置名称
+        dst: String,
+        /// 覆盖已存在的目标配置
+        #[arg(long, short)]
+        force: bool,
+    },
+
+    /// 重命名配置，活跃标记一并迁移
+    #[command(visible_aliases = ["mv"])]
+    Rename {
+        /// 原配置名称
+        src: String,
+        /// 新配置名称
+        dst: String,
+        /// 覆盖已存在的目标配置
+        #[arg(long, short)]
+        force: bool,
+    },
+
     /// 设置/查看本地使用的 Claude 模型（仅在当前 profile 为 claude 时可用）
     Model {
         /// 模型 id（如 claude-fable-5[1m]）；省略则显示当前值
@@ -95,6 +119,11 @@ impl Commands {
             Commands::Add { name, .. } | Commands::Edit { name } | Commands::Delete { name, .. } => {
                 validate_profile_arg(name)
             }
+            Commands::Copy { src, dst, .. } | Commands::Rename { src, dst, .. } => {
+                validate_profile_arg(src)?;
+                validate_profile_arg(dst)?;
+                ensure_distinct(src, dst)
+            }
             // 只是引用 profile：内置 claude 是合法目标
             Commands::Use { name, .. } | Commands::Diff { name, .. } => validate_name(name),
             Commands::List { .. } | Commands::Current { .. } | Commands::Model { .. } => Ok(()),
@@ -112,6 +141,15 @@ pub fn validate_name(name: &str) -> Result<(), CsError> {
 pub fn ensure_not_reserved(name: &str) -> Result<(), CsError> {
     if is_builtin(name) {
         return Err(CsError::ReservedProfileName { name: name.into() });
+    }
+    Ok(())
+}
+
+/// copy / rename 的源与目标必须不同：同名时 ProfileExists 那句「用 --force 覆盖」是误导，
+/// 而带上 --force 又只是无声的空操作
+fn ensure_distinct(src: &str, dst: &str) -> Result<(), CsError> {
+    if src == dst {
+        return Err(CsError::SameProfileName { name: src.into() });
     }
     Ok(())
 }

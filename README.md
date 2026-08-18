@@ -122,7 +122,7 @@ profile 与作用域无关（同一份配置既可用于项目级也可用于用
 
 `edit` 会保留你手动加在 profile 里的非受管 key；受管 key 一律按这轮输入重建。
 
-保留名：`claude` 是内置 profile，`add` / `edit` / `delete` 拒绝这个名字。
+保留名：`claude` 是内置 profile，`add` / `edit` / `delete` / `copy` / `rename` 拒绝这个名字。
 
 ### use — 切换配置
 
@@ -194,6 +194,22 @@ cp-switch delete <name> --force  # 跳过确认
 
 同时清理项目级与用户级的活跃标记，因此没有 `--user`。已写入 settings 的值不会被回滚。
 
+### copy / rename — 复制与改名
+
+```bash
+cp-switch copy <src> <dst>            # 别名: cp
+cp-switch rename <src> <dst>          # 别名: mv
+cp-switch copy <src> <dst> --force    # 覆盖已存在的目标配置
+cp-switch rename <src> <dst> --force
+```
+
+- `copy` 只复制 env，不动任何活跃标记——拿现有配置开个副本再 `edit` 改几个字段
+- `rename` 把指向旧名的活跃标记一并迁到新名下：所有项目级标记 + 用户级标记
+- settings 文件里只存 env 值、不存 profile 名，所以 `rename` 不碰 settings，改完仍是 `active`，无需重新 `use`
+- 目标名已存在时默认报错，`--force` 才覆盖。覆盖会直接丢掉目标 profile 原来的 env（含凭据）——`state.json` 没有 `.bak`，找不回来；如果那个名字正在别的项目里活跃，该项目的标记还指向它，但内容已换成源的 env，`list` 会变成 `outdated`，重新 `use` 前先确认这是你要的
+- 源和目标同名直接报错（退出码 5），不会建议你去 `--force`
+- 两个命令都写 profile 本身、与作用域无关，因此没有 `--user`；`claude` 是保留名，源和目标都不接受
+
 ### model — 设置 CC 原生模型选择器
 
 ```bash
@@ -255,7 +271,7 @@ ANTHROPIC_SMALL_FAST_MODEL        CLAUDE_CODE_EFFORT_LEVEL
 | 1 | profile 不存在 |
 | 2 | profile 已存在（需要 `--force`） |
 | 4 | 无活跃 profile |
-| 5 | profile 名非法或是保留名 |
+| 5 | profile 名非法、是保留名，或 copy/rename 的源与目标同名 |
 | 6 / 7 / 8 / 9 | I/O 错误 / JSON 解析失败 / settings 结构不合法 / 序列化失败 |
 | 10 | 没有 `.claude` 目录且用户拒绝创建 |
 | 11 | `model` 命令要求当前 profile 为 `claude` |
@@ -269,6 +285,8 @@ ANTHROPIC_SMALL_FAST_MODEL        CLAUDE_CODE_EFFORT_LEVEL
 | `list` | `ls` |
 | `current` | `show` |
 | `delete` | `rm` |
+| `copy` | `cp` |
+| `rename` | `mv` |
 
 ## License
 
